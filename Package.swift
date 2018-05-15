@@ -13,5 +13,8 @@ let package = Package(
         .target(
             name: "stellarcmd",
             dependencies: ["Sodium", "StellarKit"]),
+        .target(
+            name: "nova",
+            dependencies: ["Sodium", "StellarKit"]),
     ]
 )

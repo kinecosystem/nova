@@ -27,6 +27,7 @@ struct Command: Decodable {
     let asset_issuer: String?
     let destination: String?
     let amount: Int64?
+    let count: Int?
 }
 
 struct StellarAccount: Account {
@@ -74,6 +75,7 @@ func printUsage() {
         create <public key>
         trust <seed> <asset code> <asset issuer public key>
         pay <seed> <public key> <amount> [<asset code> <asset issuer public key>]
+        keypair [<count>]
 
         script <path to script>
     """
@@ -286,6 +288,18 @@ func perform(_ cmds: [Command]) {
             let account = StellarAccount(seedStr: seed)
 
             promise = pay(from: account, to: destination, amount: amount, asset: asset)
+        case "keypair":
+            for _ in 0 ..< (cmd.count ?? 1) {
+                if let seed = KeyUtils.seed(), let keypair = KeyUtils.keyPair(from: seed) {
+                    let pkey = StellarKit.KeyUtils.base32(publicKey: keypair.publicKey)
+                    let seed = StellarKit.KeyUtils.base32(seed: seed)
+
+                    print("PKEY: \(pkey)")
+                    print("SEED: \(seed)")
+                }
+            }
+
+            promise = Promise<String>().signal("")
         default:
             print("Unrecognized command in script: \(cmd.cmd)")
             exit(1)
@@ -353,7 +367,8 @@ if args.count == 2 {
                          asset_code: nil,
                          asset_issuer: nil,
                          destination: nil,
-                         amount: nil)])
+                         amount: nil,
+                         count: nil)])
     case "create":
         perform([Command(cmd: args[0],
                          continueOnError: false,
@@ -362,7 +377,8 @@ if args.count == 2 {
                          asset_code: nil,
                          asset_issuer: nil,
                          destination: nil,
-                         amount: nil)])
+                         amount: nil,
+                         count: nil)])
     case "script":
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: args[1])) else {
             fatalError("Unable to load script: \(args[1])")
@@ -376,6 +392,16 @@ if args.count == 2 {
         catch {
             fatalError("Unable to parse commands from \(args[1]): \(error)")
         }
+    case "keypair":
+        perform([Command(cmd: args[0],
+                         continueOnError: false,
+                         account: args[1],
+                         seed: nil,
+                         asset_code: nil,
+                         asset_issuer: nil,
+                         destination: nil,
+                         amount: nil,
+                         count: Int(args[1]))])
     default:
         printUsage()
     }
@@ -390,7 +416,8 @@ if args.count == 4 {
                          asset_code: args[2],
                          asset_issuer: args[3],
                          destination: nil,
-                         amount: nil)])
+                         amount: nil,
+                         count: nil)])
     case "pay":
         perform([Command(cmd: args[0],
                          continueOnError: false,
@@ -399,7 +426,8 @@ if args.count == 4 {
                          asset_code: nil,
                          asset_issuer: nil,
                          destination: args[2],
-                         amount: Int64(args[3]))])
+                         amount: Int64(args[3]),
+                         count: nil)])
     default:
         printUsage()
     }
@@ -414,7 +442,8 @@ else if args.count == 6 {
                          asset_code: args[4],
                          asset_issuer: args[5],
                          destination: args[2],
-                         amount: Int64(args[3]))])
+                         amount: Int64(args[3]),
+                         count: nil)])
     default:
         printUsage()
     }
