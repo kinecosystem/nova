@@ -350,7 +350,11 @@ else if cmd == "trust" {
     var inProgress = pairs.count
     let seeds = pairs.map({ $0.seed })
 
+    var limit = 0
     for seed in seeds {
+        limit += 1
+        if limit % 4 == 0 { Thread.sleep(forTimeInterval: 3) }
+
         trust(account: StellarAccount(seedStr: seed), asset: asset)
             .error({
                 print($0)
@@ -387,6 +391,8 @@ else if cmd == "fund" {
     let pkeys = pairs.map({ $0.address })
 
     for i in stride(from: 0, to: pkeys.count, by: 100) {
+        waiting = true
+        
         fund(accounts: Array(pkeys[i ..< min(i + 100, pkeys.count)]), asset: asset, amount: amount)
             .error({
                 print($0)
