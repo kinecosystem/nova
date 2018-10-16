@@ -16,6 +16,7 @@ struct Configuration: Decodable {
     let horizon_url: URL
     let network_id: String
     let asset: Asset?
+    let whitelist: String?
 
     struct Asset: Decodable {
         let code: String
@@ -70,6 +71,7 @@ var node: Stellar.Node!
 var xlmIssuer: StellarAccount!
 var asset: StellarKit.Asset?
 var issuerSeed: String!
+var whitelist: StellarAccount?
 
 func printConfig() {
     print(
@@ -79,6 +81,10 @@ func printConfig() {
             Node: \(node.baseURL) [\(node.networkId)]
         """
     )
+
+    if let whitelist = whitelist {
+        print("    Whitelist: \(whitelist.publicKey!)")
+    }
 
     if let asset = asset {
         print("    Asset: [\(asset.assetCode), \(asset.issuer!)]")
@@ -106,28 +112,47 @@ func create(accounts: [String]) -> Promise<String> {
         .then({ _ in
             print("Created \(accounts.count) accounts")
         })
-        .transformError({
-            return ErrorMessage(message: "Received error while creating account(s): \($0)")
+}
+
+func trust(accounts: [StellarAccount], asset: Asset) -> Promise<String> {
+    var builder = TxBuilder(source: accounts[0], node: node)
+
+    accounts.forEach {
+        builder = builder.add(operation: Operation.changeTrust(asset: asset, source: $0))
+        builder = builder.add(signer: $0)
+    }
+
+    return builder
+        .envelope(networkId: node.networkId.description)
+        .then { envelope -> Promise<String> in
+            return Stellar.postTransaction(envelope: envelope, node: node)
+        }
+        .then({ _ in
+            print("Established trust for \(accounts.count) accounts")
         })
 }
 
-func trust(account: StellarAccount, asset: Asset) -> Promise<String> {
-    return Stellar.sequence(account: account.publicKey!, node: node)
+func crust(accounts: [StellarAccount], asset: Asset) -> Promise<String> {
+    return Stellar.sequence(account: xlmIssuer.publicKey!, node: node)
         .then({ sequence -> Promise<String> in
-            let tx = Transaction(sourceAccount: account.publicKey!,
+            let cOps = accounts.map({ StellarKit.Operation.createAccount(destination: $0.publicKey!,
+                                                                         balance: 100 * 10000000) })
+            let tOps = accounts.map({ StellarKit.Operation.changeTrust(asset: asset, source: $0) })
+
+            let tx = Transaction(sourceAccount: xlmIssuer.publicKey!,
                                  seqNum: sequence,
                                  timeBounds: nil,
                                  memo: .MEMO_NONE,
-                                 operations: [ StellarKit.Operation.changeTrust(asset: asset) ])
+                                 operations: cOps + tOps)
 
             let envelope = try Stellar.sign(transaction: tx,
-                                            signer: account,
+                                            signer: xlmIssuer,
                                             node: node)
 
             return Stellar.postTransaction(envelope: envelope, node: node)
         })
-        .transformError({
-            return ErrorMessage(message: "Received error while establishing trust: \($0)")
+        .then({ _ in
+            print("Created \(accounts.count) accounts")
         })
 }
 
@@ -156,86 +181,29 @@ func fund(accounts: [String], asset: Asset, amount: Int) -> Promise<String> {
         })
 }
 
-func exhaust(source: StellarAccount, destinations: [String], asset: Asset) -> Promise<String> {
-    let p = Promise<String>()
-    let destinationIterator = InfiniteIterator(source: destinations)
+func data(account: StellarAccount, key: String, val: Data?) -> Promise<String> {
+    return Stellar.sequence(account: account.publicKey!, node: node)
+        .then({ sequence -> Promise<String> in
+            let tx = Transaction(sourceAccount: account.publicKey!,
+                                 seqNum: sequence,
+                                 timeBounds: nil,
+                                 memo: .MEMO_NONE,
+                                 operations: [
+                                     StellarKit.Operation.manageData(key: key, value: val)
+                                 ])
 
-    let queue = DispatchQueue(label: "", attributes: .concurrent)
+            let envelope = try Stellar.sign(transaction: tx,
+                                            signer: account,
+                                            node: node)
 
-    Stellar.sequence(account: source.publicKey!, node: node)
-        .then({
-            var seqNum = $0
-
-            queue.async {
-                if let result = p.result, case .error = result {
-                    return
-                }
-
-                queue.async {
-                    guard let destination = destinationIterator.next() else {
-                        p.signal(ErrorMessage(message: "Ran out of destinations?!"))
-
-                        return
-                    }
-
-                    seqNum += _exhaust(source: source,
-                                       destination: destination,
-                                       seqNum: seqNum,
-                                       asset: asset,
-                                       p: p)
-                }
-            }
+            return Stellar.postTransaction(envelope: envelope, node: node)
         })
-
-    return p
-}
-
-func _exhaust(source: StellarAccount, destination: String, seqNum: UInt64, asset: Asset, p: Promise<String>) -> UInt64 {
-    var waiting = true
-
-    let tx = Transaction(sourceAccount: source.publicKey!,
-                         seqNum: seqNum,
-                         timeBounds: nil,
-                         memo: .MEMO_NONE,
-                         operations: [ StellarKit.Operation.payment(destination: destination,
-                                                                    amount: Int64(1 * 10_000_000),
-                                                                    asset: asset) ])
-
-    do {
-        let envelope = try Stellar.sign(transaction: tx,
-                                        signer: source,
-                                        node: node)
-
-        print("--- posting transaction")
-        Stellar.postTransaction(envelope: envelope, node: node)
-            .then({ _ in
-                print("--- transaction posted")
-            })
-            .error({
-                print("--- transaction failed")
-
-                if case PaymentError.PAYMENT_UNDERFUNDED = $0 {
-                    p.signal($0)
-                }
-                else {
-                    print($0)
-                }
-            })
-            .finally({
-                waiting = false
-            })
-    }
-    catch {
-        waiting = false
-    }
-
-    while waiting {}
-
-    if let result = p.result, case .error = result {
-        return seqNum
-    }
-
-    return seqNum + 1
+        .then({ _ in
+            print("Set data for \(account.publicKey!)")
+        })
+        .transformError({
+            return ErrorMessage(message: "Received error while setting data: \($0)")
+        })
 }
 
 var args = Array(CommandLine.arguments.dropFirst())
@@ -253,12 +221,12 @@ let path: String = {
     return "./config.json"
 }()
 
-guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else {
+guard let d = try? Data(contentsOf: URL(fileURLWithPath: path)) else {
     fatalError("Missing configuration")
 }
 
 do {
-    let config = try JSONDecoder().decode(Configuration.self, from: data)
+    let config = try JSONDecoder().decode(Configuration.self, from: d)
 
     xlmIssuer = StellarAccount(seedStr: config.xlm_issuer)
     node = Stellar.Node(baseURL: config.horizon_url, networkId: .custom(config.network_id))
@@ -266,6 +234,10 @@ do {
     if let a = config.asset {
         asset = StellarKit.Asset(assetCode: a.code, issuer: a.issuer)
         issuerSeed = a.issuerSeed
+    }
+
+    if let w = config.whitelist {
+        whitelist = StellarAccount(seedStr: w)
     }
 }
 catch {
@@ -321,7 +293,11 @@ else if cmd == "create" {
 
         create(accounts: Array(pkeys[i ..< min(i + 100, pkeys.count)]))
             .error({
-                print($0)
+                if case CreateAccountError.CREATE_ACCOUNT_ALREADY_EXIST = $0 {
+                  return
+                }
+
+                print(ErrorMessage(message: "Received error while creating account(s): \($0)"))
                 exit(1)
             })
             .finally({
@@ -347,27 +323,59 @@ else if cmd == "trust" {
                                          from: Data(contentsOf: URL(fileURLWithPath: path))).keypairs
     print("Read \(pairs.count) keys.")
 
-    var inProgress = pairs.count
-    let seeds = pairs.map({ $0.seed })
+    for i in stride(from: 0, to: pairs.count, by: 10) {
+        var waiting = true
 
-    var limit = 0
-    for seed in seeds {
-        limit += 1
-        if limit % 4 == 0 { Thread.sleep(forTimeInterval: 3) }
-
-        trust(account: StellarAccount(seedStr: seed), asset: asset)
+        trust(accounts: Array(pairs[i ..< min(i + 10, pairs.count)]).map({ $0.seed }).map(StellarAccount.init), asset: asset)
             .error({
-                print($0)
+                print(ErrorMessage(message: "Received error while establishing trust: \($0)"))
                 exit(1)
             })
             .finally({
-                inProgress -= 1
+                waiting = false
             })
+
+        while waiting {}
     }
+}
+else if cmd == "crust" {
+  guard let asset = asset else {
+      print("No configured asset to trust.")
+      exit(1)
+  }
 
-    while inProgress > 0 {}
+  var path = "keypairs.json"
+  if let index = args.index(of: "-i"), index != args.endIndex {
+      path = args[args.index(after: index)]
+  }
 
-    print("Established trust")
+  print("Reading from: \(path)")
+  let pairs = try JSONDecoder().decode(GeneratedPairWrapper.self,
+                                       from: Data(contentsOf: URL(fileURLWithPath: path))).keypairs
+  print("Read \(pairs.count) keys.")
+
+  let seeds = pairs.map({ $0.seed })
+
+  for i in stride(from: 0, to: seeds.count, by: 50) {
+      var waiting = true
+
+      crust(accounts: Array(seeds[i ..< min(i + 50, seeds.count)]).map({ StellarAccount(seedStr: $0) }), asset: asset)
+          .error({
+              if case CreateAccountError.CREATE_ACCOUNT_ALREADY_EXIST = $0 {
+                return
+              }
+
+              print(ErrorMessage(message: "Received error while creating account(s): \($0)"))
+              exit(1)
+          })
+          .finally({
+              waiting = false
+          })
+
+      while waiting {}
+  }
+
+  print("Created accounts and established trust")
 }
 else if cmd == "fund" {
     guard let asset = asset else {
@@ -392,7 +400,7 @@ else if cmd == "fund" {
 
     for i in stride(from: 0, to: pkeys.count, by: 100) {
         waiting = true
-        
+
         fund(accounts: Array(pkeys[i ..< min(i + 100, pkeys.count)]), asset: asset, amount: amount)
             .error({
                 print($0)
@@ -405,53 +413,71 @@ else if cmd == "fund" {
         while waiting {}
     }
 }
-else if cmd == "flood" {
-    guard let asset = asset else {
-        print("No configured asset to flood.")
+else if cmd == "data" {
+    guard args.count == 3 else {
+        print("Invalid parameters.  Expected: <secret key> <key> <value>")
         exit(1)
     }
 
-    var path = "keypairs.json"
-    if let index = args.index(of: "-i"), index != args.endIndex {
-        path = args[args.index(after: index)]
+    let account = StellarAccount(seedStr: args[0])
+    let key = args[1]
+    let val = args[2]
+
+    print("Setting data [\(val)] for [\(key)] on account \(account.publicKey!)")
+
+    var waiting = true
+
+    data(account: account, key: key, val: val.data(using: .utf8))
+        .error({
+            print($0)
+            exit(1)
+        })
+        .finally({
+            waiting = false
+        })
+
+    while waiting {}
+}
+else if cmd == "whitelist" {
+    guard let whitelist = whitelist else {
+        print("Whitelist seed not configured.")
+        exit(1)
     }
 
-    var destPath = "destinations.json"
-    if let index = args.index(of: "-d"), index != args.endIndex {
-        destPath = args[args.index(after: index)]
+    guard args.count == 2 else {
+        print("Invalid parameters.  Expected: [add | remove] <key>")
+        exit(1)
     }
 
-    print("Reading sources from: \(path)")
-    let pairs = try JSONDecoder().decode(GeneratedPairWrapper.self,
-                                         from: Data(contentsOf: URL(fileURLWithPath: path))).keypairs
-    print("Read \(pairs.count) keys.")
+    let cmd = args[0]
 
-    print("Reading destinations from: \(destPath)")
-    let destinations = try JSONDecoder().decode([GeneratedPair].self,
-                                                from: Data(contentsOf: URL(fileURLWithPath: destPath)))
-    print("Read \(destinations.count) keys.")
-
-    var inProgress = pairs.count
-    let seeds = pairs.map({ $0.seed })
-
-    print("Starting flood.")
-
-    for seed in seeds {
-        exhaust(source: StellarAccount(seedStr: seed), destinations: destinations.map({ $0.address }), asset: asset)
-            .error({
-                print($0)
-
-                if case PaymentError.PAYMENT_UNDERFUNDED = $0 {
-
-                }
-                else {
-                    exit(1)
-                }
-            })
-            .finally({
-                inProgress -= 1
-            })
+    guard cmd == "add" || cmd == "remove" else {
+        print("Invalid command: \(cmd)")
+        exit(1)
     }
 
-    while inProgress > 0 {}
+    let account = StellarAccount(seedStr: args[1])
+
+    let val: Data?
+    if cmd == "add" {
+        val = account.keyPair.publicKey.suffix(4)
+        print("Adding \(account.publicKey!) to whitelist.")
+    }
+    else {
+        val = nil
+        print("Removing \(account.publicKey!) from whitelist.")
+    }
+
+    var waiting = true
+
+    data(account: whitelist, key: account.publicKey!, val: val)
+        .error({
+            print($0)
+            exit(1)
+        })
+        .finally({
+            waiting = false
+        })
+
+    while waiting {}
 }
