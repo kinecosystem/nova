@@ -414,20 +414,20 @@ else if cmd == "fund" {
     }
 }
 else if cmd == "data" {
-    guard args.count == 3 else {
-        print("Invalid parameters.  Expected: <secret key> <key> <value>")
+    guard (2...3).contains(args.count) else {
+        print("Invalid parameters.  Expected: <secret key> <key> [<value>]")
         exit(1)
     }
 
     let account = StellarAccount(seedStr: args[0])
     let key = args[1]
-    let val = args[2]
+    let val = args.count == 3 ? args[2].data(using: .utf8) : nil
 
-    print("Setting data [\(val)] for [\(key)] on account \(account.publicKey!)")
+    print("Setting data [\(String(describing: val))] for [\(key)] on account \(account.publicKey!)")
 
     var waiting = true
 
-    data(account: account, key: key, val: val.data(using: .utf8))
+    data(account: account, key: key, val: val)
         .error({
             print($0)
             exit(1)
