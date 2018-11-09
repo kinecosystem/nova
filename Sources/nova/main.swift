@@ -35,8 +35,10 @@ struct GeneratedPairWrapper: Codable {
 }
 
 struct StellarAccount: Account {
+    private var pubkey: String?
+
     var publicKey: String? {
-        return StellarKit.KeyUtils.base32(publicKey: keyPair.publicKey)
+        return pubkey ?? StellarKit.KeyUtils.base32(publicKey: keyPair.publicKey)
     }
 
     let keyPair: Sign.KeyPair
@@ -52,11 +54,17 @@ struct StellarAccount: Account {
         }
     }
 
-    var sign: ((Data) throws -> Data)?
+    init(publickey: String) {
+        self.init(seedStr: StellarKit.KeyUtils.base32(seed: KeyUtils.seed()!))
+
+        pubkey = publickey
+    }
 
     init() {
         self.init(seedStr: StellarKit.KeyUtils.base32(seed: KeyUtils.seed()!))
     }
+
+    var sign: ((Data) throws -> Data)?
 }
 
 struct ErrorMessage: Error, CustomStringConvertible {
@@ -68,17 +76,17 @@ struct ErrorMessage: Error, CustomStringConvertible {
 }
 
 var node: Stellar.Node!
+var whitelist: StellarAccount?
 var xlmIssuer: StellarAccount!
 var asset: StellarKit.Asset?
 var issuerSeed: String!
-var whitelist: StellarAccount?
 
 func printConfig() {
     print(
         """
         Configuration:
-            XLM Issuer: \(xlmIssuer.publicKey!)
-            Node: \(node.baseURL) [\(node.networkId)]
+        XLM Issuer: \(xlmIssuer.publicKey!)
+        Node: \(node.baseURL) [\(node.networkId)]
         """
     )
 
@@ -101,7 +109,7 @@ func create(accounts: [String]) -> Promise<String> {
                                  timeBounds: nil,
                                  memo: .MEMO_NONE,
                                  operations: accounts.map({ StellarKit.Operation.createAccount(destination: $0,
-                                                                                               balance: 100 * 10000000) }))
+                                                                                               balance: 0) }))
 
             let envelope = try Stellar.sign(transaction: tx,
                                             signer: xlmIssuer,
@@ -136,7 +144,7 @@ func crust(accounts: [StellarAccount], asset: Asset) -> Promise<String> {
     return Stellar.sequence(account: xlmIssuer.publicKey!, node: node)
         .then({ sequence -> Promise<String> in
             let cOps = accounts.map({ StellarKit.Operation.createAccount(destination: $0.publicKey!,
-                                                                         balance: 100 * 10000000) })
+                                                                         balance: 0) })
             let tOps = accounts.map({ StellarKit.Operation.changeTrust(asset: asset, source: $0) })
 
             let tx = Transaction(sourceAccount: xlmIssuer.publicKey!,
@@ -189,8 +197,8 @@ func data(account: StellarAccount, key: String, val: Data?) -> Promise<String> {
                                  timeBounds: nil,
                                  memo: .MEMO_NONE,
                                  operations: [
-                                     StellarKit.Operation.manageData(key: key, value: val)
-                                 ])
+                                    StellarKit.Operation.manageData(key: key, value: val)
+                ])
 
             let envelope = try Stellar.sign(transaction: tx,
                                             signer: account,
@@ -206,20 +214,85 @@ func data(account: StellarAccount, key: String, val: Data?) -> Promise<String> {
         })
 }
 
-var args = Array(CommandLine.arguments.dropFirst())
+var path = "./config.json"
+var input = "keypairs.json"
+var output = "keypairs.json"
+var param = ""
+var skey = ""
+var keyName = ""
 
-let path: String = {
-    if args.count >= 2 && args[0] == "-c" {
-        defer {
-            args.remove(at: 0)
-            args.remove(at: 0)
+let inputOpt = StringOption("input", shortDesc: "specify an input file [default \(input)]") { input = $0 }
+
+let root = CmdOptNode(token: CommandLine.arguments[0],
+                      subCommandRequired: true,
+                      shortDesc: "perform operations on a horizon node")
+    .add(options: [
+        StringOption("config", shortDesc: "specify a configuration file [default: \(path)]") { path = $0 },
+        ])
+    .add(commands: [
+        CmdOptNode(token: "keypairs", subCommandRequired: false, shortDesc: "create keypairs")
+            .add(options: [
+                StringOption("output", shortDesc: "specify an output file [default \(output)]") { output = $0 },
+                ]),
+        CmdOptNode(token: "create", subCommandRequired: false, shortDesc: "create accounts")
+            .add(options: [ inputOpt ]),
+        CmdOptNode(token: "trust", subCommandRequired: false, shortDesc: "trust the configured asset")
+            .add(options: [ inputOpt ]),
+        CmdOptNode(token: "crust", subCommandRequired: false, shortDesc: "create accounts and trust the configured asset")
+            .add(options: [ inputOpt ]),
+        CmdOptNode(token: "fund", subCommandRequired: false, shortDesc: "fund accounts with the configured asset")
+            .add(options: [ inputOpt ]),
+        CmdOptNode(token: "whitelist", subCommandRequired: true, shortDesc: "manage the whitelist")
+            .add(commands: [
+                CmdOptNode(token: "add", shortDesc: "add a key to the whitelist")
+                    .add(parameters: [
+                        CmdParameter("public key") { param = $0 },
+                        ]),
+                CmdOptNode(token: "remove", shortDesc: "remove a key from the whitelist")
+                    .add(parameters: [
+                        CmdParameter("public key") { param = $0 },
+                        ]),
+                CmdOptNode(token: "reserve", shortDesc: "set the reserve capacity for unwhitelisted txs")
+                    .add(parameters: [
+                        CmdParameter("percentage") { param = $0 },
+                        ]),
+                ]),
+        CmdOptNode(token: "data", subCommandRequired: false, shortDesc: "manage extra data for an account")
+        .add(parameters: [
+            CmdParameter("secret key") { skey = $0 },
+            CmdParameter("key name") { keyName = $0 },
+            ]),
+        ])
+
+let cmdpath: [String]
+let remainder: [String]
+
+do {
+    (cmdpath, remainder) = try parse(Array(CommandLine.arguments.dropFirst()), rootNode: root)
+}
+catch {
+    if let error = error as? Errors {
+        switch error {
+        case .unrecognizedOption(let opt, let node):
+            print("Unrecognized option: \(opt)\n")
+            print(help(node))
+        case .ambiguousOption(let opt, let matches, let node):
+            print("Ambiguous option \(opt) matches: \(matches.joined(separator: ", "))\n")
+            print(help(node))
+        case .missingOptionParameter(let opt, let node):
+            print("Missing parameter for option: \(opt)\n")
+            print(help(node))
+        case .missingCmdParameter(let node):
+            print("Missing parameter for command: \(node.token)\n")
+            print(help(node))
+        case .missingSubCommand(let node):
+            if node !== root { print("Missing subcommand for: \(node.token)\n") }
+            print(help(node))
         }
-
-        return args[1]
     }
 
-    return "./config.json"
-}()
+    exit(1)
+}
 
 guard let d = try? Data(contentsOf: URL(fileURLWithPath: path)) else {
     fatalError("Missing configuration")
@@ -246,21 +319,9 @@ catch {
 
 printConfig()
 
-if args.isEmpty {
-    exit(0)
-}
-
-let cmd = args[0]
-args.remove(at: 0)
-
-if cmd == "keypairs" {
-    let count = Int(args.first ?? "1") ?? 1
+if cmdpath[0] == "keypairs" {
+    let count = Int(remainder.first ?? "1") ?? 1
     var pairs = [GeneratedPair]()
-
-    var path = "keypairs.json"
-    if let index = args.index(of: "-o"), index != args.endIndex {
-        path = args[args.index(after: index)]
-    }
 
     print("Generating \(count) keys.")
     for _ in 0 ..< count {
@@ -272,18 +333,14 @@ if cmd == "keypairs" {
         }
     }
 
-    print("Writing to: \(path)")
-    try JSONEncoder().encode(GeneratedPairWrapper(keypairs: pairs)).write(to: URL(fileURLWithPath: path), options: [.atomic])
+    print("Writing to: \(output)")
+    try JSONEncoder().encode(GeneratedPairWrapper(keypairs: pairs))
+        .write(to: URL(fileURLWithPath: output), options: [.atomic])
 }
-else if cmd == "create" {
-    var path = "keypairs.json"
-    if let index = args.index(of: "-i"), index != args.endIndex {
-        path = args[args.index(after: index)]
-    }
-
-    print("Reading from: \(path)")
+else if cmdpath[0] == "create" {
+    print("Reading from: \(input)")
     let pairs = try JSONDecoder().decode(GeneratedPairWrapper.self,
-                                         from: Data(contentsOf: URL(fileURLWithPath: path))).keypairs
+                                         from: Data(contentsOf: URL(fileURLWithPath: input))).keypairs
     print("Read \(pairs.count) keys.")
 
     let pkeys = pairs.map({ $0.address })
@@ -294,7 +351,7 @@ else if cmd == "create" {
         create(accounts: Array(pkeys[i ..< min(i + 100, pkeys.count)]))
             .error({
                 if case CreateAccountError.CREATE_ACCOUNT_ALREADY_EXIST = $0 {
-                  return
+                    return
                 }
 
                 print(ErrorMessage(message: "Received error while creating account(s): \($0)"))
@@ -307,26 +364,21 @@ else if cmd == "create" {
         while waiting {}
     }
 }
-else if cmd == "trust" {
+else if cmdpath[0] == "trust" {
     guard let asset = asset else {
         print("No configured asset to trust.")
         exit(1)
     }
 
-    var path = "keypairs.json"
-    if let index = args.index(of: "-i"), index != args.endIndex {
-        path = args[args.index(after: index)]
-    }
-
-    print("Reading from: \(path)")
+    print("Reading from: \(input)")
     let pairs = try JSONDecoder().decode(GeneratedPairWrapper.self,
-                                         from: Data(contentsOf: URL(fileURLWithPath: path))).keypairs
+                                         from: Data(contentsOf: URL(fileURLWithPath: input))).keypairs
     print("Read \(pairs.count) keys.")
 
     for i in stride(from: 0, to: pairs.count, by: 10) {
         var waiting = true
 
-        trust(accounts: Array(pairs[i ..< min(i + 10, pairs.count)]).map({ $0.seed }).map(StellarAccount.init), asset: asset)
+        trust(accounts: Array(pairs[i ..< min(i + 10, pairs.count)]).map({ $0.seed }).map(StellarAccount.init(seedStr:)), asset: asset)
             .error({
                 print(ErrorMessage(message: "Received error while establishing trust: \($0)"))
                 exit(1)
@@ -338,61 +390,51 @@ else if cmd == "trust" {
         while waiting {}
     }
 }
-else if cmd == "crust" {
-  guard let asset = asset else {
-      print("No configured asset to trust.")
-      exit(1)
-  }
+else if cmdpath[0] == "crust" {
+    guard let asset = asset else {
+        print("No configured asset to trust.")
+        exit(1)
+    }
 
-  var path = "keypairs.json"
-  if let index = args.index(of: "-i"), index != args.endIndex {
-      path = args[args.index(after: index)]
-  }
+    print("Reading from: \(input)")
+    let pairs = try JSONDecoder().decode(GeneratedPairWrapper.self,
+                                         from: Data(contentsOf: URL(fileURLWithPath: input))).keypairs
+    print("Read \(pairs.count) keys.")
 
-  print("Reading from: \(path)")
-  let pairs = try JSONDecoder().decode(GeneratedPairWrapper.self,
-                                       from: Data(contentsOf: URL(fileURLWithPath: path))).keypairs
-  print("Read \(pairs.count) keys.")
+    let seeds = pairs.map({ $0.seed })
 
-  let seeds = pairs.map({ $0.seed })
+    for i in stride(from: 0, to: seeds.count, by: 50) {
+        var waiting = true
 
-  for i in stride(from: 0, to: seeds.count, by: 50) {
-      var waiting = true
+        crust(accounts: Array(seeds[i ..< min(i + 50, seeds.count)]).map({ StellarAccount(seedStr: $0) }), asset: asset)
+            .error({
+                if case CreateAccountError.CREATE_ACCOUNT_ALREADY_EXIST = $0 {
+                    return
+                }
 
-      crust(accounts: Array(seeds[i ..< min(i + 50, seeds.count)]).map({ StellarAccount(seedStr: $0) }), asset: asset)
-          .error({
-              if case CreateAccountError.CREATE_ACCOUNT_ALREADY_EXIST = $0 {
-                return
-              }
+                print(ErrorMessage(message: "Received error while creating account(s): \($0)"))
+                exit(1)
+            })
+            .finally({
+                waiting = false
+            })
 
-              print(ErrorMessage(message: "Received error while creating account(s): \($0)"))
-              exit(1)
-          })
-          .finally({
-              waiting = false
-          })
+        while waiting {}
+    }
 
-      while waiting {}
-  }
-
-  print("Created accounts and established trust")
+    print("Created accounts and established trust")
 }
-else if cmd == "fund" {
+else if cmdpath[0] == "fund" {
     guard let asset = asset else {
         print("No configured asset to fund.")
         exit(1)
     }
 
-    let amount = Int(args.first ?? "1000") ?? 10000
+    let amount = Int(remainder.first ?? "1000") ?? 10000
 
-    var path = "keypairs.json"
-    if let index = args.index(of: "-i"), index != args.endIndex {
-        path = args[args.index(after: index)]
-    }
-
-    print("Reading from: \(path)")
+    print("Reading from: \(input)")
     let pairs = try JSONDecoder().decode(GeneratedPairWrapper.self,
-                                         from: Data(contentsOf: URL(fileURLWithPath: path))).keypairs
+                                         from: Data(contentsOf: URL(fileURLWithPath: input))).keypairs
     print("Read \(pairs.count) keys.")
 
     var waiting = true
@@ -413,21 +455,34 @@ else if cmd == "fund" {
         while waiting {}
     }
 }
-else if cmd == "data" {
-    guard (2...3).contains(args.count) else {
-        print("Invalid parameters.  Expected: <secret key> <key> [<value>]")
+else if cmdpath[0] == "whitelist" {
+    guard let whitelist = whitelist else {
+        print("Whitelist seed not configured.")
         exit(1)
     }
 
-    let account = StellarAccount(seedStr: args[0])
-    let key = args[1]
-    let val = args.count == 3 ? args[2].data(using: .utf8) : nil
+    let key: String
+    let val: Data?
 
-    print("Setting data [\(String(describing: val))] for [\(key)] on account \(account.publicKey!)")
+    switch cmdpath[1] {
+    case "add":
+        let account = StellarAccount(publickey: param)
+        key = account.publicKey!
+        val = account.keyPair.publicKey.suffix(4)
+    case "remove":
+        let account = StellarAccount(publickey: param)
+        key = account.publicKey!
+        val = nil
+    case "reserve":
+        let reserve = Int32(param)
+        key = "reserve"
+        val = withUnsafeBytes(of: reserve!.bigEndian) { Data($0) }
+    default: key = ""; val = nil
+    }
 
     var waiting = true
 
-    data(account: account, key: key, val: val)
+    data(account: whitelist, key: key, val: val)
         .error({
             print($0)
             exit(1)
@@ -438,39 +493,20 @@ else if cmd == "data" {
 
     while waiting {}
 }
-else if cmd == "whitelist" {
-    guard let whitelist = whitelist else {
-        print("Whitelist seed not configured.")
-        exit(1)
-    }
+else if cmdpath[0] == "data" {
+    let account = StellarAccount(seedStr: skey)
+    let val = remainder.count > 0 ? remainder[0].data(using: .utf8) : nil
 
-    guard args.count == 2 else {
-        print("Invalid parameters.  Expected: [add | remove] <key>")
-        exit(1)
-    }
-
-    let cmd = args[0]
-
-    guard cmd == "add" || cmd == "remove" else {
-        print("Invalid command: \(cmd)")
-        exit(1)
-    }
-
-    let account = StellarAccount(seedStr: args[1])
-
-    let val: Data?
-    if cmd == "add" {
-        val = account.keyPair.publicKey.suffix(4)
-        print("Adding \(account.publicKey!) to whitelist.")
+    if let val = val {
+        print("Setting data [\(val.hexString)] for [\(keyName)] on account \(account.publicKey!)")
     }
     else {
-        val = nil
-        print("Removing \(account.publicKey!) from whitelist.")
+        print("Clearing [\(keyName)] on account \(account.publicKey!)")
     }
 
     var waiting = true
 
-    data(account: whitelist, key: account.publicKey!, val: val)
+    data(account: account, key: keyName, val: val)
         .error({
             print($0)
             exit(1)
