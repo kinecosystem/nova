@@ -2,8 +2,8 @@
 //  InfiniteIterator.swift
 //  stellar
 //
-//  Created by Kin Foundation.
-//  Copyright © 2018 Kin Foundation. All rights reserved.
+//  Created by Kin Ecosystem.
+//  Copyright © 2018 Kin Ecosystem. All rights reserved.
 //
 
 class InfiniteIterator<T>: IteratorProtocol {

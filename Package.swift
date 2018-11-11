@@ -7,7 +7,7 @@ let package = Package(
     name: "stellarcmd",
     dependencies: [
       .package(url: "../kin-core-ios/KinSDK/StellarKit", from: "0.9.0"),
-      .package(url: "../kin-core-ios/KinSDK/StellarKit/StellarKit/third-party/swift-sodium", from: "0.0.0"),
+      .package(url: "https://github.com/jedisct1/swift-sodium.git", from: "0.7.0"),
     ],
     targets: [
         .target(

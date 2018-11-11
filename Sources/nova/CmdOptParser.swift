@@ -2,19 +2,11 @@
 //  CmdOptParser.swift
 //  KinUtil
 //
-//  Created by Avi Shevin on 03/11/2018.
+//  Created by Kin Ecosystem.
+//  Copyright © 2018 Kin Ecosystem. All rights reserved.
 //
 
 import Foundation
-
-public protocol OptionProtocol {
-    var token: String { get }
-    var shortDesc: String { get }
-}
-
-protocol OptConsumer {
-    var consumes: Int { get }
-}
 
 protocol Parameter {
     associatedtype OptType
@@ -34,25 +26,48 @@ extension Parameter {
 public struct StringParameter: Parameter {
     typealias OptType = String
 
-    var handler: (String) -> ()
+    var handler: (OptType) -> ()
 
-    func coerce(parameters: ArraySlice<String>) -> String? {
+    func coerce(parameters: ArraySlice<String>) -> OptType? {
         return parameters.last
     }
 }
 
-public class Option: OptionProtocol {
+public struct IntParameter: Parameter {
+    typealias OptType = Int
+
+    var handler: (OptType) -> ()
+
+    func coerce(parameters: ArraySlice<String>) -> OptType? {
+        guard let p = parameters.last else {
+            return nil
+        }
+
+        return Int(p)
+    }
+}
+
+public class Option {
     public let token: String
     public let shortDesc: String
-    
+
+    fileprivate(set) var consumes = 0
+
     init(_ token: String, shortDesc: String = "") {
         self.token = token
         self.shortDesc = shortDesc
     }
 }
 
-public class ToggleOption: Option, OptConsumer {
-    let consumes: Int = 0
+public extension Option {
+    public static func string(_ token: String,
+                              shortDesc: String = "",
+                              handler: @escaping (String) -> ()) -> Option {
+        return StringOption(token, shortDesc: shortDesc, handler: handler)
+    }
+}
+
+public final class ToggleOption: Option {
     var handler: (Bool) -> ()
 
     public init(_ token: String, shortDesc: String, handler: @escaping (Bool) -> ()) {
@@ -60,41 +75,29 @@ public class ToggleOption: Option, OptConsumer {
 
         super.init(token, shortDesc: shortDesc)
     }
-
-    func coerce(parameters: ArraySlice<String>) -> Bool? {
-        return nil
-    }
 }
 
-public class StringOption: Option, OptConsumer {
-    let consumes: Int = 1
+public final class StringOption: Option {
     let parameter: StringParameter
 
     public init(_ token: String, shortDesc: String, handler: @escaping (String) -> ()) {
         self.parameter = StringParameter(handler: handler)
 
         super.init(token, shortDesc: shortDesc)
+
+        consumes = 1
     }
 }
 
-public class IntOption: Option, Parameter {
-    public typealias OptType = Int
+public final class IntOption: Option {
+    var parameter: IntParameter
 
-    let consumes: Int = 1
-    var handler: (IntOption.OptType) -> ()
-
-    public init(_ token: String, shortDesc: String, handler: @escaping (IntOption.OptType) -> ()) {
-        self.handler = handler
+    public init(_ token: String, shortDesc: String, handler: @escaping (Int) -> ()) {
+        self.parameter = IntParameter(handler: handler)
 
         super.init(token, shortDesc: shortDesc)
-    }
 
-    func coerce(parameters: ArraySlice<String>) -> Int? {
-        guard let p = parameters.last else {
-            return nil
-        }
-
-        return Int(p)
+        consumes = 1
     }
 }
 
@@ -123,7 +126,7 @@ public final class CmdOptNode {
     weak var parent: CmdOptNode?
 
     private(set) var commands = [CmdOptNode]()
-    private(set) var options = [OptionProtocol]()
+    private(set) var options = [Option]()
     private(set) var parameters = [CmdParameter]()
 
     public init(token: String,
@@ -146,7 +149,7 @@ public final class CmdOptNode {
     }
 
     @discardableResult
-    public func add(options: [OptionProtocol]) -> CmdOptNode {
+    public func add(options: [Option]) -> CmdOptNode {
         self.options = options
 
         return self
@@ -160,13 +163,14 @@ public final class CmdOptNode {
     }
 }
 
-public enum Errors: Error {
+public enum CmdOptParserErrors: Error {
     case unrecognizedOption(String, CmdOptNode)
     case ambiguousOption(String, [String], CmdOptNode)
-    case missingOptionParameter(OptionProtocol, CmdOptNode)
+    case missingOptionParameter(Option, CmdOptNode)
     case missingCmdParameter(CmdOptNode)
     case missingSubCommand(CmdOptNode)
 }
+private typealias E = CmdOptParserErrors
 
 public func parse(_ arguments: [String],
                   rootNode: CmdOptNode) throws -> ([String], [String]) {
@@ -195,11 +199,11 @@ private func _parse(arguments: ArraySlice<String>,
 
         var argument = arguments[i]
 
-        let optHandler = { (opt: OptionProtocol) in
-            shouldConsume = (opt as! OptConsumer).consumes
+        let optHandler = { (opt: Option) in
+            shouldConsume = opt.consumes
 
             if i + shouldConsume >= arguments.endIndex {
-                throw Errors.missingOptionParameter(opt, node)
+                throw E.missingOptionParameter(opt, node)
             }
 
             // Special support for toggles
@@ -233,10 +237,10 @@ private func _parse(arguments: ArraySlice<String>,
 
                 guard opts.count == 1 else {
                     if opts.isEmpty {
-                        throw Errors.unrecognizedOption(arguments[i], node)
+                        throw E.unrecognizedOption(arguments[i], node)
                     }
                     else {
-                        throw Errors.ambiguousOption(arguments[i], opts.map { $0.token }, node)
+                        throw E.ambiguousOption(arguments[i], opts.map { $0.token }, node)
                     }
                 }
 
@@ -250,7 +254,7 @@ private func _parse(arguments: ArraySlice<String>,
                 let paramCount = node.parameters.count
 
                 if paramCount >= arguments.count {
-                    throw Errors.missingCmdParameter(node)
+                    throw E.missingCmdParameter(node)
                 }
 
                 for pi in 0 ..< paramCount {
@@ -272,7 +276,7 @@ private func _parse(arguments: ArraySlice<String>,
     }
 
     if node.subCommandRequired && path.count <= depth {
-        throw Errors.missingSubCommand(node)
+        throw E.missingSubCommand(node)
     }
 
     return arguments[index...]
