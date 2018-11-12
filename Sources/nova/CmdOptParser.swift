@@ -14,36 +14,27 @@ protocol Parameter {
     var handler: (OptType) -> () { get }
 
     func coerce(parameters: ArraySlice<String>) -> OptType?
-    func coerce(parameter: String) -> OptType?
 }
 
-extension Parameter {
-    func coerce(parameter: String) -> OptType? {
-        return coerce(parameters: [parameter][...])
-    }
-}
-
-public struct StringParameter: Parameter {
-    typealias OptType = String
+public struct GenericParameter<G> {
+    typealias OptType = G
 
     var handler: (OptType) -> ()
-
-    func coerce(parameters: ArraySlice<String>) -> OptType? {
-        return parameters.last
-    }
 }
 
-public struct IntParameter: Parameter {
-    typealias OptType = Int
-
-    var handler: (OptType) -> ()
-
+extension GenericParameter where G == Int {
     func coerce(parameters: ArraySlice<String>) -> OptType? {
         guard let p = parameters.last else {
             return nil
         }
 
         return Int(p)
+    }
+}
+
+extension GenericParameter where G == String {
+    func coerce(parameters: ArraySlice<String>) -> OptType? {
+        return parameters.last
     }
 }
 
@@ -63,7 +54,13 @@ public extension Option {
     public static func string(_ token: String,
                               shortDesc: String = "",
                               handler: @escaping (String) -> ()) -> Option {
-        return StringOption(token, shortDesc: shortDesc, handler: handler)
+        return SingleOption(token, shortDesc: shortDesc, handler: handler)
+    }
+
+    public static func int(_ token: String,
+                           shortDesc: String = "",
+                           handler: @escaping (Int) -> ()) -> Option {
+        return SingleOption(token, shortDesc: shortDesc, handler: handler)
     }
 }
 
@@ -77,23 +74,11 @@ public final class ToggleOption: Option {
     }
 }
 
-public final class StringOption: Option {
-    let parameter: StringParameter
+public final class SingleOption<T>: Option {
+    let parameter: GenericParameter<T>
 
-    public init(_ token: String, shortDesc: String, handler: @escaping (String) -> ()) {
-        self.parameter = StringParameter(handler: handler)
-
-        super.init(token, shortDesc: shortDesc)
-
-        consumes = 1
-    }
-}
-
-public final class IntOption: Option {
-    var parameter: IntParameter
-
-    public init(_ token: String, shortDesc: String, handler: @escaping (Int) -> ()) {
-        self.parameter = IntParameter(handler: handler)
+    public init(_ token: String, shortDesc: String, handler: @escaping (T) -> ()) {
+        self.parameter = GenericParameter(handler: handler)
 
         super.init(token, shortDesc: shortDesc)
 
@@ -104,10 +89,10 @@ public final class IntOption: Option {
 public final class CmdParameter: Option {
     public typealias OptType = String
 
-    let parameter: StringParameter
+    let parameter: GenericParameter<String>
 
     public init(_ token: String, shortDesc: String = "", handler: @escaping (String) -> ()) {
-        self.parameter = StringParameter(handler: handler)
+        self.parameter = GenericParameter(handler: handler)
 
         super.init(token, shortDesc: shortDesc)
     }
@@ -212,7 +197,7 @@ private func _parse(arguments: ArraySlice<String>,
             }
             else {
                 if
-                    let o = opt as? StringOption,
+                    let o = opt as? SingleOption<String>,
                     let v = o.parameter.coerce(parameters: arguments[(i + 1) ... (i + shouldConsume)])
                 {
                     o.parameter.handler(v)
@@ -259,7 +244,7 @@ private func _parse(arguments: ArraySlice<String>,
 
                 for pi in 0 ..< paramCount {
                     let param = node.parameters[pi]
-                    if let p = param.parameter.coerce(parameter: arguments[pi + i + 1]) {
+                    if let p = param.parameter.coerce(parameters: arguments[(pi + i + 1)...]) {
                         param.parameter.handler(p)
                     }
                 }
