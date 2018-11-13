@@ -170,6 +170,8 @@ public func parse(_ arguments: [String],
 
 private func _parse(arguments: ArraySlice<String>,
                     node: CmdOptNode, path: inout [String]) throws -> ArraySlice<String> {
+    var arguments = arguments
+    
     var shouldConsume = 0
     var index: Int = arguments.startIndex
     let depth = path.count
@@ -207,6 +209,13 @@ private func _parse(arguments: ArraySlice<String>,
 
         if argument.starts(with: "-") {
             while argument.starts(with: "-") { argument = String(argument.dropFirst()) }
+
+            if argument.firstIndex(of: "=") != argument.index(before: argument.endIndex) {
+                let split = argument.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+
+                argument = String(split[0])
+                arguments.insert(String(split[1]), at: i + 1)
+            }
 
             // Exact match
             if let opt = node.options.filter({ $0.token == argument }).last {
