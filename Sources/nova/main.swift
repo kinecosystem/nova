@@ -32,6 +32,7 @@ var output = "keypairs.json"
 var param = ""
 var skey = ""
 var keyName = ""
+var whitelister: String?
 
 let inputOpt = Option.string("input", shortDesc: "specify an input file [default \(input)]") { input = $0 }
 
@@ -53,7 +54,10 @@ let root = CmdOptNode(token: CommandLine.arguments[0],
         CmdOptNode(token: Command.crust.rawValue, shortDesc: "create accounts and trust the configured asset")
             .add(options: [ inputOpt ]),
         CmdOptNode(token: Command.fund.rawValue, shortDesc: "fund accounts with the configured asset")
-            .add(options: [ inputOpt ]),
+            .add(options: [
+                inputOpt,
+                Option.string("whitelist", shortDesc: "Key to sign to whitelist the tx", handler: { whitelister = $0 })
+                ]),
         CmdOptNode(token: Command.whitelist.rawValue, subCommandRequired: true, shortDesc: "manage the whitelist")
             .add(commands: [
                 CmdOptNode(token: "add", shortDesc: "add a key to the whitelist")
@@ -252,7 +256,7 @@ case .whitelist:
     case "add":
         let account = StellarAccount(publickey: param)
         key = account.publicKey!
-        val = Data(account.keyPair.publicKey.suffix(4))
+        val = Data(StellarKit.KeyUtils.key(base32: param).suffix(4))
     case "remove":
         let account = StellarAccount(publickey: param)
         key = account.publicKey!
