@@ -88,24 +88,21 @@ func crust(accounts: [StellarAccount], asset: Asset) -> Promise<String> {
 }
 
 func fund(accounts: [String], asset: Asset, amount: Int) -> Promise<String> {
-    return Stellar.sequence(account: asset.issuer!, node: node)
-        .then({ sequence -> Promise<String> in
-            let ops = accounts.map({ StellarKit.Operation.payment(destination: $0,
-                                                                  amount: Int64(amount) * 10_000_000,
-                                                                  asset: asset) })
-            let tx = Transaction(sourceAccount: asset.issuer!,
-                                 seqNum: sequence,
-                                 timeBounds: nil,
-                                 memo: .MEMO_NONE,
-                                 fee: UInt32(ops.count) * 100,
-                                 operations: ops)
+    let issuer = asset == .ASSET_TYPE_NATIVE ? xlmIssuer! : StellarAccount(seedStr: issuerSeed)
 
-            let envelope = try Stellar.sign(transaction: tx,
-                                            signer: StellarAccount(seedStr: issuerSeed),
-                                            node: node)
+    var builder = TxBuilder(source: issuer, node: node)
+        .add(operations: accounts.map({ StellarKit.Operation.payment(destination: $0,
+                                                                     amount: Int64(amount) * 10_000_000,
+                                                                     asset: asset) }))
+    if let whitelister = whitelister {
+        builder = builder.add(signer: StellarAccount(seedStr: whitelister))
+    }
 
+    return builder
+        .envelope(networkId: node.networkId.description)
+        .then { envelope -> Promise<String> in
             return Stellar.postTransaction(envelope: envelope, node: node)
-        })
+        }
         .then({ _ in
             print("Funded \(accounts.count) accounts")
         })

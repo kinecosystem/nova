@@ -223,10 +223,7 @@ case .crust:
 
     print("Created accounts and established trust")
 case .fund:
-    guard let asset = asset else {
-        print("No configured asset to fund.")
-        exit(1)
-    }
+    let fundingAsset = asset ?? .ASSET_TYPE_NATIVE
 
     let amount = Int(remainder.first ?? "1000") ?? 10000
     let pkeys = try read(input: input).map({ $0.address })
@@ -236,7 +233,7 @@ case .fund:
     for i in stride(from: 0, to: pkeys.count, by: 100) {
         waiting = true
 
-        fund(accounts: Array(pkeys[i ..< min(i + 100, pkeys.count)]), asset: asset, amount: amount)
+        fund(accounts: Array(pkeys[i ..< min(i + 100, pkeys.count)]), asset: fundingAsset, amount: amount)
             .error { print($0); exit(1) }
             .finally { waiting = false }
 

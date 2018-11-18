@@ -210,7 +210,7 @@ private func _parse(arguments: ArraySlice<String>,
         if argument.starts(with: "-") {
             while argument.starts(with: "-") { argument = String(argument.dropFirst()) }
 
-            if argument.firstIndex(of: "=") != argument.index(before: argument.endIndex) {
+            if let eqIndex = argument.firstIndex(of: "="), eqIndex < argument.index(before: argument.endIndex) {
                 let split = argument.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
 
                 argument = String(split[0])
