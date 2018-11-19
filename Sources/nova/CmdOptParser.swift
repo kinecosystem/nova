@@ -163,9 +163,29 @@ public func parse(_ arguments: [String],
 
     let splits = arguments.split(separator: "--", maxSplits: 1, omittingEmptySubsequences: true)
 
-    let remainder = try _parse(arguments: splits[0][...], node: rootNode, path: &cmdPath)
+    let remainder = try _parse(arguments: preprocessOptions(splits[0])[...],
+                               node: rootNode,
+                               path: &cmdPath)
 
     return (cmdPath, Array(remainder + (splits.count > 1 ? splits[1] : [])))
+}
+
+private func preprocessOptions(_ arguments: ArraySlice<String>) -> [String] {
+    var modified = [String]()
+
+    for arg in arguments {
+        if arg.starts(with: "-"), let eqIndex = arg.firstIndex(of: "="), eqIndex < arg.index(before: arg.endIndex) {
+            let splits = arg.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+
+            modified.append(String(splits[0]))
+            modified.append(String(splits[1]))
+        }
+        else {
+            modified.append(arg)
+        }
+    }
+
+    return modified
 }
 
 private func _parse(arguments: ArraySlice<String>,
@@ -209,13 +229,6 @@ private func _parse(arguments: ArraySlice<String>,
 
         if argument.starts(with: "-") {
             while argument.starts(with: "-") { argument = String(argument.dropFirst()) }
-
-            if let eqIndex = argument.firstIndex(of: "="), eqIndex < argument.index(before: argument.endIndex) {
-                let split = argument.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
-
-                argument = String(split[0])
-                arguments.insert(String(split[1]), at: i + 1)
-            }
 
             // Exact match
             if let opt = node.options.filter({ $0.token == argument }).last {
