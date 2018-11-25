@@ -19,8 +19,6 @@ var issuerSeed: String!
 enum Command: String {
     case keypairs
     case create
-    case trust
-    case crust
     case fund
     case whitelist
     case data
@@ -33,82 +31,96 @@ var param = ""
 var skey = ""
 var keyName = ""
 var whitelister: String?
+var percentage: Int?
+var amount: Int?
 
-let inputOpt = Option.string("input", shortDesc: "specify an input file [default \(input)]") { input = $0 }
+let inputOpt = Node.option("input", description: "")
 
-let root = CmdOptNode(token: CommandLine.arguments[0],
-                      subCommandRequired: true,
-                      shortDesc: "perform operations on a horizon node")
-    .add(options: [
-        .string("config", shortDesc: "specify a configuration file [default: \(path)]") { path = $0 },
-        ])
-    .add(commands: [
-        CmdOptNode(token: Command.keypairs.rawValue, shortDesc: "create keypairs")
-            .add(options: [
-                .string("output", shortDesc: "specify an output file [default \(output)]") { output = $0 },
-                ]),
-        CmdOptNode(token: Command.create.rawValue, shortDesc: "create accounts")
-            .add(options: [ inputOpt ]),
-        CmdOptNode(token: Command.trust.rawValue, shortDesc: "trust the configured asset")
-            .add(options: [ inputOpt ]),
-        CmdOptNode(token: Command.crust.rawValue, shortDesc: "create accounts and trust the configured asset")
-            .add(options: [ inputOpt ]),
-        CmdOptNode(token: Command.fund.rawValue, shortDesc: "fund accounts with the configured asset")
-            .add(options: [
-                inputOpt,
-                Option.string("whitelist", shortDesc: "Key to sign to whitelist the tx", handler: { whitelister = $0 })
-                ]),
-        CmdOptNode(token: Command.whitelist.rawValue, subCommandRequired: true, shortDesc: "manage the whitelist")
-            .add(commands: [
-                CmdOptNode(token: "add", shortDesc: "add a key to the whitelist")
-                    .add(parameters: [
-                        CmdParameter("public key") { param = $0 },
-                        ]),
-                CmdOptNode(token: "remove", shortDesc: "remove a key from the whitelist")
-                    .add(parameters: [
-                        CmdParameter("public key") { param = $0 },
-                        ]),
-                CmdOptNode(token: "reserve", shortDesc: "set the reserve capacity for unwhitelisted txs")
-                    .add(parameters: [
-                        CmdParameter("percentage") { param = $0 },
-                        ]),
-                ]),
-        CmdOptNode(token: Command.data.rawValue, shortDesc: "manage extra data for an account")
-            .add(parameters: [
-                CmdParameter("secret key") { skey = $0 },
-                CmdParameter("key name") { keyName = $0 },
-                ]),
-        ])
+let root2 = Node.root("nova", "perform operations on a horizon node", [
+    .option("config", description: "specify a configuration file [default: \(path)]"),
 
-let cmdpath: [String]
-let remainder: [String]
+    .command("keypairs", description: "create keypairs for use by other commands",
+             [.option("output", description: "specify an output file [default \(output)]")]),
 
+    .command("create", description: "create accounts",
+             [inputOpt]),
+
+    .command("fund", description: "fund accounts, using the configured asset, if any", [
+        inputOpt,
+        .parameter("whitelist", description: "key with which to whitelist the tx"),
+        .parameter("amount", type: .int(nil))
+        ]),
+
+    .command("whitelist", description: "manage the whitelist", [
+        .command("add", description: "add a key",
+                 [.parameter("key")]),
+
+        .command("remove", description: "remove a key",
+                 [.parameter("key")]),
+
+        .command("reserve", description: "set the %capacity to reserve for non-whitelisted accounts",
+                 [.parameter("percentage", type: .int(1...100))]),
+        ]),
+
+    .command("data", description: "manage data on an account", [
+        .parameter("secret key", description: "secret key of account to manage"),
+        .parameter("key name", description: "key of data item"),
+        ]),
+    ])
+
+let parseResults: ParseResults
 do {
-    (cmdpath, remainder) = try parse(Array(CommandLine.arguments.dropFirst()), rootNode: root)
+    parseResults = try parse(Array(CommandLine.arguments.dropFirst()), node: root2)
 }
-catch {
-    if let error = error as? CmdOptParserErrors {
-        switch error {
-        case .unrecognizedOption(let opt, let node):
-            print("Unrecognized option: \(opt)\n")
-            print(help(node))
-        case .ambiguousOption(let opt, let matches, let node):
-            print("Ambiguous option \(opt) matches: \(matches.joined(separator: ", "))\n")
-            print(help(node))
-        case .missingOptionParameter(let opt, let node):
-            print("Missing parameter for option: \(opt)\n")
-            print(help(node))
-        case .missingCmdParameter(let node):
-            print("Missing parameter for command: \(node.token)\n")
-            print(help(node))
-        case .missingSubCommand(let node):
-            if node !== root { print("Missing subcommand for: \(node.token)\n") }
-            print(help(node))
-        }
+catch let error as CmdOptParseErrors {
+    switch error {
+    case .unknownOption(let (str, path)):
+        print("Unknown option: \(str)")
+        print(usage(path))
+
+    case .ambiguousOption(let (str, possibilities, path)):
+        print("Ambiguous option: \(str)")
+        print("Possible matches: " + possibilities.compactMap {
+            if case let Node.parameter(opt, _) = $0 {
+                return "-" + opt.token
+            }
+
+            return nil
+            }.joined(separator: ", "))
+
+        print(usage(path))
+
+    case .missingValue(let (param, type, path)):
+        print("Missing value for: \((type == .fixed ? "" : "+") + param.token)")
+        print(usage(path))
+
+    case .invalidValueType(let (param, str, type, path)):
+        print("Invalid value \"\(str)\" for: \((type == .fixed ? "" : "+") + param.token)")
+        print(usage(path))
+
+    case .invalidValue(let (param, str, type, path)):
+        print("Invalid value \"\(str)\" for: \((type == .fixed ? "" : "+") + param.token)")
+        print(usage(path))
+
+    case .missingSubcommand(let path):
+        print(usage(path))
+
+    default:
+        break
     }
 
     exit(1)
 }
+
+path = parseResults.optionValues["config"] as? String ?? path
+input = parseResults.optionValues["input"] as? String ?? input
+output = parseResults.optionValues["output"] as? String ?? output
+param = parseResults.parameterValues.first as? String ?? param
+skey = parseResults.parameterValues.first as? String ?? skey
+keyName = parseResults.parameterValues.last as? String ?? keyName
+whitelister = parseResults.optionValues["whitelist"] as? String
+percentage = parseResults.parameterValues.last as? Int
+amount = parseResults.parameterValues.last as? Int
 
 guard let d = try? Data(contentsOf: URL(fileURLWithPath: path)) else {
     fatalError("Missing configuration")
@@ -135,11 +147,11 @@ catch {
 
 printConfig()
 
-let command = Command(rawValue: cmdpath[0])!
+let command = Command(rawValue: parseResults.commandPath[1].token)!
 
 switch command {
 case .keypairs:
-    let count = Int(remainder.first ?? "1") ?? 1
+    let count = amount ?? 1
     var pairs = [GeneratedPair]()
 
     print("Generating \(count) keys.")
@@ -155,6 +167,7 @@ case .keypairs:
     print("Writing to: \(output)")
     try JSONEncoder().encode(GeneratedPairWrapper(keypairs: pairs))
         .write(to: URL(fileURLWithPath: output), options: [.atomic])
+
 case .create:
     let pkeys = try read(input: input).map({ $0.address })
 
@@ -176,60 +189,11 @@ case .create:
 
         while waiting {}
     }
-case .trust:
-    guard let asset = asset else {
-        print("No configured asset to trust.")
-        exit(1)
-    }
 
-    let pairs = try read(input: input)
-
-    for i in stride(from: 0, to: pairs.count, by: 10) {
-        var waiting = true
-
-        let accounts = Array(pairs[i ..< min(i + 10, pairs.count)])
-            .map({ $0.seed })
-            .map(StellarAccount.init(seedStr:))
-
-        trust(accounts: accounts, asset: asset)
-            .error { print($0); exit(1) }
-            .finally { waiting = false }
-
-        while waiting {}
-    }
-case .crust:
-    guard let asset = asset else {
-        print("No configured asset to trust.")
-        exit(1)
-    }
-
-    let seeds = try read(input: input).map({ $0.seed })
-
-    for i in stride(from: 0, to: seeds.count, by: 50) {
-        var waiting = true
-
-        crust(accounts: Array(seeds[i ..< min(i + 50, seeds.count)])
-            .map({ StellarAccount(seedStr: $0) }), asset: asset)
-            .error({
-                if case CreateAccountError.CREATE_ACCOUNT_ALREADY_EXIST = $0 {
-                    return
-                }
-
-                print("Received error while creating account(s): \($0)")
-                exit(1)
-            })
-            .finally({
-                waiting = false
-            })
-
-        while waiting {}
-    }
-
-    print("Created accounts and established trust")
 case .fund:
     let fundingAsset = asset ?? .ASSET_TYPE_NATIVE
 
-    let amount = Int(remainder.first ?? "1000") ?? 10000
+    let amt = amount ?? 10000
     let pkeys = try read(input: input).map({ $0.address })
 
     var waiting = true
@@ -237,12 +201,13 @@ case .fund:
     for i in stride(from: 0, to: pkeys.count, by: 100) {
         waiting = true
 
-        fund(accounts: Array(pkeys[i ..< min(i + 100, pkeys.count)]), asset: fundingAsset, amount: amount)
+        fund(accounts: Array(pkeys[i ..< min(i + 100, pkeys.count)]), asset: fundingAsset, amount: amt)
             .error { print($0); exit(1) }
             .finally { waiting = false }
 
         while waiting {}
     }
+
 case .whitelist:
     guard let whitelist = whitelist else {
         print("Whitelist seed not configured.")
@@ -252,7 +217,7 @@ case .whitelist:
     let key: String
     let val: Data?
 
-    switch cmdpath[1] {
+    switch parseResults.commandPath[2].token {
     case "add":
         let account = StellarAccount(publickey: param)
         key = account.publicKey!
@@ -275,9 +240,10 @@ case .whitelist:
         .finally { waiting = false }
 
     while waiting {}
+
 case .data:
     let account = StellarAccount(seedStr: skey)
-    let val = remainder.count > 0 ? remainder[0].data(using: .utf8) : nil
+    let val = parseResults.remainder.count > 0 ? parseResults.remainder[0].data(using: .utf8) : nil
 
     if let val = val {
         print("Setting data [\(val.hexString)] for [\(keyName)] on account \(account.publicKey!)")

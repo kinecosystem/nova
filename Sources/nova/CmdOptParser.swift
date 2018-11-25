@@ -1,348 +1,402 @@
 //
-//  CmdOptParser.swift
+//  CmdOptParser2.swift
 //  KinUtil
 //
-//  Created by Kin Ecosystem.
-//  Copyright © 2018 Kin Ecosystem. All rights reserved.
+//  Created by Avi Shevin on 25/11/2018.
 //
 
 import Foundation
 
-protocol Parameter {
-    associatedtype OptType
+public enum CmdOptParseErrors: Error {
+    case unknownOption(String, [Node])
+    case ambiguousOption(String, [Node], [Node])
+    case missingValue(Parameter, ParameterType, [Node])
+    case invalidValue(Parameter, String, ParameterType, [Node])
+    case invalidValueType(Parameter, String, ParameterType, [Node])
+    case missingSubcommand([Node])
+    case mutualExclusivityViolation(Node)
+    case invalidParameterType(Parameter, ParameterType, [Node])
+    case invalidRootType(Node)
+}
+typealias E = CmdOptParseErrors
 
-    var handler: (OptType) -> () { get }
-
-    func coerce(parameters: ArraySlice<String>) -> OptType?
+public indirect enum Type {
+    case string
+    case int(ClosedRange<Int>?)
+    case bool
+    case date(format: String)
+    case array(Type)
+    case toggle
 }
 
-public struct GenericParameter<G> {
-    typealias OptType = G
-
-    var handler: (OptType) -> ()
+public enum ParameterType {
+    case fixed
+    case tagged
 }
 
-extension GenericParameter where G == Int {
-    func coerce(parameters: ArraySlice<String>) -> OptType? {
-        guard let p = parameters.last else {
+public struct Parameter {
+    public let token: String
+    let type: Type
+    let description: String
+
+    init(_ token: String, type: Type = .string, description: String = "") {
+        self.token = token
+        self.type = type
+        self.description = description
+    }
+}
+
+public struct Command {
+    let token: String
+    let description: String
+
+    init(_ token: String, description: String = "") {
+        self.token = token
+        self.description = description
+    }
+}
+
+public indirect enum Node {
+    case root(String, String, [Node])
+
+    case parameter(Parameter, ParameterType)
+    case command(Command, [Node])
+}
+
+public extension Node {
+    static func parameter(_ token: String, type: Type = .string , description: String = "") -> Node {
+        return .parameter(Parameter(token, type: type, description: description), .fixed)
+    }
+
+    static func option(_ token: String, type: Type = .string , description: String = "") -> Node {
+        return .parameter(Parameter(token, type: type, description: description), .tagged)
+    }
+
+    static func command(_ token: String, description: String = "", _ children: [Node]) -> Node {
+        return .command(Command(token, description: description), children)
+    }
+}
+
+public extension Node {
+    public var token: String {
+        switch self {
+        case .root(let token, _, _): return token
+        case .parameter(let param, _): return param.token
+        case .command(let cmd, _): return cmd.token
+        }
+    }
+
+    func parameters(of type: ParameterType) -> [Node] {
+        if case let .root(_, _, nodes) = self {
+            return nodes.filter { if case let .parameter(_, t) = $0 { return t == type }; return false }
+        }
+
+        if case let .command(_, nodes) = self {
+            return nodes.filter { if case let .parameter(_, t) = $0 { return t == type }; return false }
+        }
+
+        return []
+    }
+
+    var parameters: [Node] {
+        return parameters(of: .fixed)
+    }
+
+    var options: [Node] {
+        return parameters(of: .tagged)
+    }
+
+    var commands: [Node] {
+        if case let .root(_, _, nodes) = self {
+            return nodes.filter { if case .command = $0 { return true }; return false }
+        }
+
+        if case let .command(_, nodes) = self {
+            return nodes.filter { if case .command = $0 { return true }; return false }
+        }
+
+        return []
+    }
+}
+
+extension Node: CustomStringConvertible {
+    public var description: String {
+        switch self {
+        case .root: return "root: " + token
+        case .parameter: return "parameter: " + token
+        case .command: return "command: " + token
+        }
+    }
+}
+
+public struct ParseResults {
+    public let commandPath: [Node]
+    public let parameterValues: [Any]
+    public let optionValues: [String: Any]
+    public let remainder: [String]
+}
+
+private let dateFormatter = DateFormatter()
+
+private func prepare(_ args: [String]) -> ([String], [String]) {
+    var remainder = [String]()
+    if let index = args.firstIndex(of: "--"), index != args.endIndex - 1 {
+        remainder = Array(args[(index + 1)...])
+    }
+
+    return (Array(args[0 ..< (args.firstIndex(of: "--") ?? args.endIndex)])
+        .map { (a) -> [String] in
+            if a.starts(with: "-"), let eqIndex = a.firstIndex(of: "="), eqIndex < a.index(before: a.endIndex) {
+                return a.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+            }
+
+            return [a]
+        }.flatMap { $0 }, remainder)
+}
+
+public func parse(_ arguments: [String], node: Node) throws -> ParseResults {
+    guard case let Node.root(_, _, nodes) = node else {
+        throw E.invalidRootType(node)
+    }
+
+    var commandPath = [node]
+    var parameterValues = [Any]()
+    var optionValues = [String: Any]()
+
+    var (arguments, remainder) = prepare(arguments)
+
+    func value(for opt: Parameter, parameterType: ParameterType) throws -> (String, Any)? {
+        func checkedValue(_ arg: String, for opt: Parameter, as type: Type) throws -> (String, Any) {
+            switch type {
+            case .string:
+                return (opt.token, arg)
+
+            case .int(let range):
+                guard let i = Int(arg) else { throw E.invalidValueType(opt, arg, parameterType, commandPath) }
+
+                guard range == nil || range!.contains(i) else { throw E.invalidValue(opt, arg, parameterType, commandPath)}
+
+                return (opt.token, i)
+
+            case .bool:
+                guard let b = Bool(arg) else { throw E.invalidValueType(opt, arg, parameterType, commandPath) }
+
+                return (opt.token, b)
+
+            case .date(let format):
+                dateFormatter.dateFormat = format
+                guard let d = dateFormatter.date(from: arg) else { throw E.invalidValue(opt, arg, parameterType, commandPath)}
+
+                return (opt.token, d)
+
+            default:
+                throw E.invalidValueType(opt, arg, parameterType, commandPath)
+            }
+        }
+
+        let arg = arguments.pop()
+
+        switch opt.type {
+        case .array(let type):
+            return try checkedValue(arg, for: opt, as: type)
+        case .toggle:
             return nil
-        }
-
-        return Int(p)
-    }
-}
-
-extension GenericParameter where G == String {
-    func coerce(parameters: ArraySlice<String>) -> OptType? {
-        return parameters.last
-    }
-}
-
-public class Option {
-    public let token: String
-    public let shortDesc: String
-
-    fileprivate(set) var consumes = 0
-
-    init(_ token: String, shortDesc: String = "") {
-        self.token = token
-        self.shortDesc = shortDesc
-    }
-}
-
-public extension Option {
-    public static func string(_ token: String,
-                              shortDesc: String = "",
-                              handler: @escaping (String) -> ()) -> Option {
-        return SingleOption(token, shortDesc: shortDesc, handler: handler)
-    }
-
-    public static func int(_ token: String,
-                           shortDesc: String = "",
-                           handler: @escaping (Int) -> ()) -> Option {
-        return SingleOption(token, shortDesc: shortDesc, handler: handler)
-    }
-}
-
-public final class ToggleOption: Option {
-    var handler: (Bool) -> ()
-
-    public init(_ token: String, shortDesc: String, handler: @escaping (Bool) -> ()) {
-        self.handler = handler
-
-        super.init(token, shortDesc: shortDesc)
-    }
-}
-
-public final class SingleOption<T>: Option {
-    let parameter: GenericParameter<T>
-
-    public init(_ token: String, shortDesc: String, handler: @escaping (T) -> ()) {
-        self.parameter = GenericParameter(handler: handler)
-
-        super.init(token, shortDesc: shortDesc)
-
-        consumes = 1
-    }
-}
-
-public final class CmdParameter: Option {
-    public typealias OptType = String
-
-    let parameter: GenericParameter<String>
-
-    public init(_ token: String, shortDesc: String = "", handler: @escaping (String) -> ()) {
-        self.parameter = GenericParameter(handler: handler)
-
-        super.init(token, shortDesc: shortDesc)
-    }
-
-    func coerce(parameters: ArraySlice<String>) -> String? {
-        return parameters.last
-    }
-}
-
-public final class CmdOptNode {
-    public let token: String
-    let subCommandRequired: Bool
-    let shortDesc: String
-    let longDesc: String?
-
-    weak var parent: CmdOptNode?
-
-    private(set) var commands = [CmdOptNode]()
-    private(set) var options = [Option]()
-    private(set) var parameters = [CmdParameter]()
-
-    public init(token: String,
-                subCommandRequired: Bool = false,
-                shortDesc: String = "",
-                longDesc: String? = nil) {
-        self.token = token
-        self.subCommandRequired = subCommandRequired
-        self.shortDesc = shortDesc
-        self.longDesc = longDesc
-    }
-
-    @discardableResult
-    public func add(commands: [CmdOptNode]) -> CmdOptNode {
-        commands.forEach { $0.parent = self }
-
-        self.commands = commands
-
-        return self
-    }
-
-    @discardableResult
-    public func add(options: [Option]) -> CmdOptNode {
-        self.options = options
-
-        return self
-    }
-
-    @discardableResult
-    public func add(parameters: [CmdParameter]) -> CmdOptNode {
-        self.parameters = parameters
-
-        return self
-    }
-}
-
-public enum CmdOptParserErrors: Error {
-    case unrecognizedOption(String, CmdOptNode)
-    case ambiguousOption(String, [String], CmdOptNode)
-    case missingOptionParameter(Option, CmdOptNode)
-    case missingCmdParameter(CmdOptNode)
-    case missingSubCommand(CmdOptNode)
-}
-private typealias E = CmdOptParserErrors
-
-public func parse(_ arguments: [String],
-                  rootNode: CmdOptNode) throws -> ([String], [String]) {
-    var cmdPath = [String]()
-
-    let splits = arguments.split(separator: "--", maxSplits: 1, omittingEmptySubsequences: true)
-
-    let remainder = try _parse(arguments: preprocessOptions(splits[0])[...],
-                               node: rootNode,
-                               path: &cmdPath)
-
-    return (cmdPath, Array(remainder + (splits.count > 1 ? splits[1] : [])))
-}
-
-private func preprocessOptions(_ arguments: ArraySlice<String>) -> [String] {
-    var modified = [String]()
-
-    for arg in arguments {
-        if arg.starts(with: "-"), let eqIndex = arg.firstIndex(of: "="), eqIndex < arg.index(before: arg.endIndex) {
-            let splits = arg.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
-
-            modified.append(String(splits[0]))
-            modified.append(String(splits[1]))
-        }
-        else {
-            modified.append(arg)
+        default:
+            return try checkedValue(arg, for: opt, as: opt.type)
         }
     }
 
-    return modified
-}
+    func optionMatches(_ arg: String, options: [Node]) throws -> [Node] {
+        var matches = [Node]()
 
-private func _parse(arguments: ArraySlice<String>,
-                    node: CmdOptNode, path: inout [String]) throws -> ArraySlice<String> {
-    var arguments = arguments
-    
-    var shouldConsume = 0
-    var index: Int = arguments.startIndex
-    let depth = path.count
+        if arg.starts(with: "-") {
+            // Exact match
+            matches = options.filter {
+                if case let .parameter(opt, _) = $0 {
+                    return "-" + opt.token == arg || "--" + opt.token == arg
+                }
 
-    for i in arguments.indices {
-        index += 1
-
-        if shouldConsume > 0 {
-            shouldConsume -= 1
-            continue
-        }
-
-        var argument = arguments[i]
-
-        let optHandler = { (opt: Option) in
-            shouldConsume = opt.consumes
-
-            if i + shouldConsume >= arguments.endIndex {
-                throw E.missingOptionParameter(opt, node)
+                return false
             }
 
-            // Special support for toggles
-            if let opt = opt as? ToggleOption {
-                opt.handler(true)
-            }
-            else {
-                if
-                    let o = opt as? SingleOption<String>,
-                    let v = o.parameter.coerce(parameters: arguments[(i + 1) ... (i + shouldConsume)])
-                {
-                    o.parameter.handler(v)
+            // Prefix match
+            if matches.isEmpty {
+                matches = options.filter {
+                    if case let .parameter(opt, _) = $0 {
+                        return ("-" + opt.token).starts(with:arg) ||
+                            ("--" + opt.token).starts(with:arg)
+                    }
+
+                    return false
                 }
             }
+
+            // notoggle match
+            if matches.isEmpty {
+                matches = options.filter {
+                    if case let .parameter(opt, _) = $0, case .toggle = opt.type {
+                        return ("-no" + opt.token).starts(with:arg) ||
+                            ("--no" + opt.token).starts(with:arg)
+                    }
+
+                    return false
+                }
+            }
+
+            if matches.count == 0 { throw E.unknownOption(arg, commandPath) }
+            else if matches.count > 1 { throw E.ambiguousOption(arg, matches, commandPath) }
         }
 
-        if argument.starts(with: "-") {
-            while argument.starts(with: "-") { argument = String(argument.dropFirst()) }
+        return matches
+    }
 
-            // Exact match
-            if let opt = node.options.filter({ $0.token == argument }).last {
-                try optHandler(opt)
-            }
-                // Check for inverted toggles
-            else if let opt = node.options.filter({ "no\($0.token)" == argument }).last as? ToggleOption {
-                opt.handler(false)
-            }
-            else {
-                // Partial match
-                let opts = node.options.filter({ $0.token.starts(with: argument) })
+    func _parse(nodes: [Node], from node: Node) throws {
+        let parameters = node.parameters
+        let options = node.options
+        let commands = node.commands
 
-                guard opts.count == 1 else {
-                    if opts.isEmpty {
-                        throw E.unrecognizedOption(arguments[i], node)
+        guard parameters.isEmpty || commands.isEmpty else {
+            throw E.mutualExclusivityViolation(node)
+        }
+
+        var done = false
+
+        while !arguments.isEmpty && !done {
+            let arg = arguments[0]
+
+            if let match = try optionMatches(arg, options: options).first {
+                arguments.pop()
+
+                if case let .parameter(opt, _) = match {
+                    if case .toggle = opt.type {
+                        optionValues[opt.token] =
+                            !arg.starts(with: "-no") && !arg.starts(with: "--no")
                     }
                     else {
-                        throw E.ambiguousOption(arguments[i], opts.map { $0.token }, node)
+                        guard !arguments.isEmpty else { throw E.missingValue(opt, .tagged, commandPath) }
+
+                        if let v = try value(for: opt, parameterType: .tagged) {
+                            if case .array = opt.type {
+                                var a = optionValues[v.0] as? [Any] ?? [Any]()
+                                a.append(v.1)
+                                optionValues[v.0] = a
+                            }
+                            else {
+                                optionValues[v.0] = v.1
+                            }
+                        }
+                    }
+                }
+            }
+            else {
+                for node in commands {
+                    if case let .command(cmd, children) = node {
+                        if cmd.token == arg {
+                            arguments.pop()
+
+                            commandPath.append(node)
+
+                            try _parse(nodes: children, from: node)
+                        }
                     }
                 }
 
-                try optHandler(opts[0])
+                done = true
             }
         }
-        else {
-            if let node = node.commands.filter({ $0.token == argument }).last {
-                path.append(argument)
 
-                let paramCount = node.parameters.count
-
-                if paramCount >= arguments.count {
-                    throw E.missingCmdParameter(node)
+        for node in parameters {
+            if case let .parameter(param, _) = node {
+                if case .toggle = param.type {
+                    throw E.invalidParameterType(param, .fixed, commandPath)
                 }
+                else {
+                    guard !arguments.isEmpty else { throw E.missingValue(param, .fixed, commandPath) }
 
-                for pi in 0 ..< paramCount {
-                    let param = node.parameters[pi]
-                    if let p = param.parameter.coerce(parameters: arguments[(pi + i + 1)...]) {
-                        param.parameter.handler(p)
+                    if let v = try value(for: param, parameterType: .fixed) {
+                        parameterValues.append(v.1)
                     }
                 }
-
-                return try _parse(arguments: arguments[(i + 1 + paramCount)...],
-                                  node: node,
-                                  path: &path)
             }
+        }
 
-            index -= 1
-            
-            break
+        if !commands.isEmpty && !done {
+            throw E.missingSubcommand(commandPath)
         }
     }
 
-    if node.subCommandRequired && path.count <= depth {
-        throw E.missingSubCommand(node)
-    }
+    try _parse(nodes: nodes, from: node)
 
-    return arguments[index...]
+    return ParseResults(commandPath: commandPath,
+                        parameterValues: parameterValues,
+                        optionValues: optionValues,
+                        remainder: arguments + remainder)
 }
 
-public func help(_ node: CmdOptNode) -> String {
-    var path = [ node.token ]
+public func usage(_ node: Node) -> String {
+    return usage([node])
+}
 
-    var n = node
-    while let parent = n.parent {
-        path.append(parent.token)
-        n = parent
+public func usage(_ path: [Node]) -> String {
+    let root = path[0]
+    let node = path[path.index(before: path.endIndex)]
+
+    guard case Node.root = root else {
+        return ""
     }
 
-    var help = "OVERVIEW: \(node.longDesc ?? node.shortDesc)\n\nUSAGE: " +
-        path.reversed().joined(separator: " ")
+    var usage = "USAGE: \(path.map { $0.token }.joined(separator: " "))"
 
-    if !node.parameters.isEmpty {
-        help += " " + node.parameters.map({ "<\($0.token)>" }).joined(separator: " ")
-    }
+    var optionlist = ""
+    var commandlist = ""
 
-    if !node.options.isEmpty {
-        help += " [options]"
-    }
+    let options = node.options
+    let commands = node.commands
+    let parameters = node.parameters
 
-    if !node.commands.isEmpty {
-        help += node.subCommandRequired ? " <cmd>" : " [cmd]"
+    if !options.isEmpty {
+        usage += " [options]"
 
-        if !node.parameters.isEmpty {
-            help += " <parameters>"
+        optionlist = "\n\nOPTIONS:"
+
+        let width = options.map { $0.token.count }.reduce(0, max)
+
+        options.forEach {
+            if case let .parameter(val, _) = $0 {
+                optionlist += "\n  -\(val.token)" +
+                    String(repeating: " ", count: width - $0.token.count) + " : \(val.description)"
+            }
         }
     }
 
-    if !node.options.isEmpty {
-        help += "\n\nOPTIONS:\n"
+    if !commands.isEmpty {
+        usage += " <command>"
 
-        let width = node.options.map { $0.token.count }.reduce(0, max)
+        commandlist = "\n\nSUBCOMMANDS:"
 
-        node.options.forEach {
-            help += "  -" +
-                $0.token +
-                String(repeating: " ", count: width - $0.token.count) + " : \($0.shortDesc)\n"
-        }
-    }
-    else {
-        help += "\n"
-    }
+        let width = commands.map { $0.token.count }.reduce(0, max)
 
-    if !node.commands.isEmpty {
-        help += "\nSUBCOMMANDS:\n"
-
-        let width = node.commands.map { $0.token.count }.reduce(0, max)
-
-        node.commands.forEach {
-            help += "  " +
-                $0.token +
-                String(repeating: " ", count: width - $0.token.count) + " : \($0.shortDesc)\n"
+        commands.forEach {
+            if case let .command(val) = $0 {
+                commandlist += "\n  \($0.token)" +
+                    String(repeating: " ", count: width - $0.token.count) + " : \(val.0.description)"
+            }
         }
     }
 
-    return help
+    if !parameters.isEmpty {
+        usage += " " + parameters.map({ "<\($0.token)>" }).joined(separator: " ")
+    }
+
+    return usage + optionlist + commandlist
+}
+
+extension Array where Element == String {
+    @discardableResult
+    mutating func pop() -> String {
+        let s = self[0]
+        remove(at: 0)
+
+        return s
+    }
 }
