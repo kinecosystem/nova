@@ -16,12 +16,13 @@ var xlmIssuer: StellarAccount!
 var asset: StellarKit.Asset?
 var issuerSeed: String!
 
-enum Command: String {
+enum Commands: String {
     case keypairs
     case create
     case fund
     case whitelist
     case data
+    case pay
 }
 
 var path = "./config.json"
@@ -34,21 +35,26 @@ var whitelister: String?
 var percentage: Int?
 var amount: Int?
 
-let inputOpt = Node.option("input", description: "")
+let inputOpt = Node.option("input", description: "input file containing keypairs upon which to act")
 
-let root2 = Node.root("nova", "perform operations on a horizon node", [
+let root = Node.root("nova", "perform operations on a horizon node", [
     .option("config", description: "specify a configuration file [default: \(path)]"),
 
-    .command("keypairs", description: "create keypairs for use by other commands",
-             [.option("output", description: "specify an output file [default \(output)]")]),
+    .command("keypairs", description: "create keypairs for use by other commands", [
+        .option("output", description: "specify an output file [default \(output)]"),
+        .parameter("amount", type: .int(nil)),
+        ]),
 
-    .command("create", description: "create accounts",
-             [inputOpt]),
+    .command("create", description: "create accounts", [
+        inputOpt,
+        .option("key", description: "public key of the account to fund"),
+        ]),
 
     .command("fund", description: "fund accounts, using the configured asset, if any", [
         inputOpt,
-        .parameter("whitelist", description: "key with which to whitelist the tx"),
-        .parameter("amount", type: .int(nil))
+        .option("whitelist", description: "key with which to whitelist the tx"),
+        .option("key", description: "public key of the account to fund"),
+        .parameter("amount", type: .int(nil)),
         ]),
 
     .command("whitelist", description: "manage the whitelist", [
@@ -66,11 +72,18 @@ let root2 = Node.root("nova", "perform operations on a horizon node", [
         .parameter("secret key", description: "secret key of account to manage"),
         .parameter("key name", description: "key of data item"),
         ]),
+
+    .command("pay", description: "send payment to the specified account", [
+        .option("whitelist", description: "key with which to whitelist the tx"),
+        .parameter("secret key", description: "secret key of source account"),
+        .parameter("destination key", description: "public key of destination account"),
+        .parameter("amount", type: .int(nil)),
+        ]),
     ])
 
 let parseResults: ParseResults
 do {
-    parseResults = try parse(Array(CommandLine.arguments.dropFirst()), node: root2)
+    parseResults = try parse(Array(CommandLine.arguments.dropFirst()), node: root)
 }
 catch let error as CmdOptParseErrors {
     switch error {
@@ -117,7 +130,7 @@ input = parseResults.optionValues["input"] as? String ?? input
 output = parseResults.optionValues["output"] as? String ?? output
 param = parseResults.parameterValues.first as? String ?? param
 skey = parseResults.parameterValues.first as? String ?? skey
-keyName = parseResults.parameterValues.last as? String ?? keyName
+keyName = parseResults.parameterValues.last as? String ?? parseResults.optionValues["key"] as? String ?? keyName
 whitelister = parseResults.optionValues["whitelist"] as? String
 percentage = parseResults.parameterValues.last as? Int
 amount = parseResults.parameterValues.last as? Int
@@ -147,7 +160,7 @@ catch {
 
 printConfig()
 
-let command = Command(rawValue: parseResults.commandPath[1].token)!
+let command = Commands(rawValue: parseResults.commandPath[1].token)!
 
 switch command {
 case .keypairs:
@@ -169,7 +182,9 @@ case .keypairs:
         .write(to: URL(fileURLWithPath: output), options: [.atomic])
 
 case .create:
-    let pkeys = try read(input: input).map({ $0.address })
+    let pkeys = keyName.isEmpty
+        ? try read(input: input).map({ $0.address })
+        : [keyName]
 
     for i in stride(from: 0, to: pkeys.count, by: 100) {
         var waiting = true
@@ -194,7 +209,9 @@ case .fund:
     let fundingAsset = asset ?? .ASSET_TYPE_NATIVE
 
     let amt = amount ?? 10000
-    let pkeys = try read(input: input).map({ $0.address })
+    let pkeys = keyName.isEmpty
+        ? try read(input: input).map({ $0.address })
+        : [keyName]
 
     var waiting = true
 
@@ -255,6 +272,21 @@ case .data:
     var waiting = true
 
     data(account: account, key: keyName, val: val)
+        .error { print($0); exit(1) }
+        .finally { waiting = false }
+
+    while waiting {}
+
+case .pay:
+    let fundingAsset = asset ?? .ASSET_TYPE_NATIVE
+
+    let source = StellarAccount(seedStr: skey)
+    let destination = parseResults.parameterValues[1] as! String
+    let amount = Int(parseResults.remainder.first ?? "1000") ?? 1000
+
+    var waiting = true
+
+    fund(from: source, accounts: [destination], asset: fundingAsset, amount: amount)
         .error { print($0); exit(1) }
         .finally { waiting = false }
 

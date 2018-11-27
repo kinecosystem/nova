@@ -87,8 +87,9 @@ func crust(accounts: [StellarAccount], asset: Asset) -> Promise<String> {
         })
 }
 
-func fund(accounts: [String], asset: Asset, amount: Int) -> Promise<String> {
-    let issuer = asset == .ASSET_TYPE_NATIVE ? xlmIssuer! : StellarAccount(seedStr: issuerSeed)
+func fund(from source: StellarAccount? = nil, accounts: [String], asset: Asset, amount: Int) -> Promise<String> {
+    let issuer = source ??
+        (asset == .ASSET_TYPE_NATIVE ? xlmIssuer! : StellarAccount(seedStr: issuerSeed))
 
     var builder = TxBuilder(source: issuer, node: node)
         .add(operations: accounts.map({ StellarKit.Operation.payment(destination: $0,
