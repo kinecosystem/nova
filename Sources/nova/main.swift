@@ -26,8 +26,7 @@ enum Commands: String {
 }
 
 var path = "./config.json"
-var input = "keypairs.json"
-var output = "keypairs.json"
+var file = "keypairs.json"
 var param = ""
 var skey = ""
 var keyName = ""
@@ -35,13 +34,13 @@ var whitelister: String?
 var percentage: Int?
 var amount: Int?
 
-let inputOpt = Node.option("input", description: "input file containing keypairs upon which to act")
+let inputOpt = Node.option("input", description: "specify an input file [default \(file)]")
 
-let root = Node.root("nova", "perform operations on a horizon node", [
+let root = Node.root(CommandLine.arguments[0], "perform operations on a Horizon node", [
     .option("config", description: "specify a configuration file [default: \(path)]"),
 
     .command("keypairs", description: "create keypairs for use by other commands", [
-        .option("output", description: "specify an output file [default \(output)]"),
+        .option("output", description: "specify an output file [default \(file)]"),
         .parameter("amount", type: .int(nil)),
         ]),
 
@@ -104,15 +103,15 @@ catch let error as CmdOptParseErrors {
         print(usage(path))
 
     case .missingValue(let (param, type, path)):
-        print("Missing value for: \((type == .fixed ? "" : "+") + param.token)")
+        print("Missing value for: \((type == .fixed ? "" : "-") + param.token)")
         print(usage(path))
 
     case .invalidValueType(let (param, str, type, path)):
-        print("Invalid value \"\(str)\" for: \((type == .fixed ? "" : "+") + param.token)")
+        print("Invalid value \"\(str)\" for: \((type == .fixed ? "" : "-") + param.token)")
         print(usage(path))
 
     case .invalidValue(let (param, str, type, path)):
-        print("Invalid value \"\(str)\" for: \((type == .fixed ? "" : "+") + param.token)")
+        print("Invalid value \"\(str)\" for: \((type == .fixed ? "" : "-") + param.token)")
         print(usage(path))
 
     case .missingSubcommand(let path):
@@ -125,15 +124,15 @@ catch let error as CmdOptParseErrors {
     exit(1)
 }
 
-path = parseResults.optionValues["config"] as? String ?? path
-input = parseResults.optionValues["input"] as? String ?? input
-output = parseResults.optionValues["output"] as? String ?? output
-param = parseResults.parameterValues.first as? String ?? param
-skey = parseResults.parameterValues.first as? String ?? skey
-keyName = parseResults.parameterValues.last as? String ?? parseResults.optionValues["key"] as? String ?? keyName
-whitelister = parseResults.optionValues["whitelist"] as? String
-percentage = parseResults.parameterValues.last as? Int
-amount = parseResults.parameterValues.last as? Int
+path = parseResults["config", String.self] ?? path
+file = parseResults["input", String.self] ?? file
+file = parseResults["output", String.self] ?? file
+param = parseResults.first(as: String.self) ?? param
+skey = parseResults.first(as: String.self) ?? skey
+keyName = parseResults.last(as: String.self) ?? parseResults["key", String.self] ?? keyName
+whitelister = parseResults["whitelist", String.self]
+percentage = parseResults.last(as: Int.self)
+amount = parseResults.last(as: Int.self)
 
 guard let d = try? Data(contentsOf: URL(fileURLWithPath: path)) else {
     fatalError("Missing configuration")
@@ -177,13 +176,13 @@ case .keypairs:
         }
     }
 
-    print("Writing to: \(output)")
+    print("Writing to: \(file)")
     try JSONEncoder().encode(GeneratedPairWrapper(keypairs: pairs))
-        .write(to: URL(fileURLWithPath: output), options: [.atomic])
+        .write(to: URL(fileURLWithPath: file), options: [.atomic])
 
 case .create:
     let pkeys = keyName.isEmpty
-        ? try read(input: input).map({ $0.address })
+        ? try read(input: file).map({ $0.address })
         : [keyName]
 
     for i in stride(from: 0, to: pkeys.count, by: 100) {
@@ -210,7 +209,7 @@ case .fund:
 
     let amt = amount ?? 10000
     let pkeys = keyName.isEmpty
-        ? try read(input: input).map({ $0.address })
+        ? try read(input: file).map({ $0.address })
         : [keyName]
 
     var waiting = true

@@ -56,9 +56,8 @@ public struct Command {
     }
 }
 
-public indirect enum Node {
+public enum Node {
     case root(String, String, [Node])
-
     case parameter(Parameter, ParameterType)
     case command(Command, [Node])
 }
@@ -136,6 +135,24 @@ public struct ParseResults {
     public let remainder: [String]
 }
 
+public extension ParseResults {
+    subscript <T>(_ index: Int, _ type: T.Type) -> T? {
+        return parameterValues[index] as? T
+    }
+
+    subscript <T>(_ name: String, _ type: T.Type) -> T? {
+        return optionValues[name] as? T
+    }
+
+    func first<T>(as type: T.Type) -> T? {
+        return parameterValues.first as? T
+    }
+
+    func last<T>(as type: T.Type) -> T? {
+        return parameterValues.last as? T
+    }
+}
+
 private let dateFormatter = DateFormatter()
 
 private func prepare(_ args: [String]) -> ([String], [String]) {
@@ -146,8 +163,13 @@ private func prepare(_ args: [String]) -> ([String], [String]) {
 
     return (Array(args[0 ..< (args.firstIndex(of: "--") ?? args.endIndex)])
         .map { (a) -> [String] in
-            if a.starts(with: "-"), let eqIndex = a.firstIndex(of: "="), eqIndex < a.index(before: a.endIndex) {
-                return a.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+            if
+                a.starts(with: "-"),
+                let eqIndex = a.firstIndex(of: "="),
+                eqIndex < a.index(before: a.endIndex)
+            {
+                return a.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+                    .map(String.init)
             }
 
             return [a]
@@ -165,32 +187,35 @@ public func parse(_ arguments: [String], node: Node) throws -> ParseResults {
 
     var (arguments, remainder) = prepare(arguments)
 
-    func value(for opt: Parameter, parameterType: ParameterType) throws -> (String, Any)? {
-        func checkedValue(_ arg: String, for opt: Parameter, as type: Type) throws -> (String, Any) {
+    func value(for opt: Parameter, parameterType: ParameterType) throws -> Any? {
+        func checkedValue(_ arg: String, for opt: Parameter, as type: Type) throws -> Any {
+            let invalidValue = { E.invalidValue(opt, arg, parameterType, commandPath)}
+            let invalidValueType = { E.invalidValue(opt, arg, parameterType, commandPath)}
+
             switch type {
             case .string:
-                return (opt.token, arg)
+                return arg
 
             case .int(let range):
-                guard let i = Int(arg) else { throw E.invalidValueType(opt, arg, parameterType, commandPath) }
+                guard let i = Int(arg) else { throw invalidValueType() }
 
-                guard range == nil || range!.contains(i) else { throw E.invalidValue(opt, arg, parameterType, commandPath)}
+                guard range == nil || range!.contains(i) else { throw invalidValue() }
 
-                return (opt.token, i)
+                return i
 
             case .bool:
-                guard let b = Bool(arg) else { throw E.invalidValueType(opt, arg, parameterType, commandPath) }
+                guard let b = Bool(arg) else { throw invalidValueType() }
 
-                return (opt.token, b)
+                return b
 
             case .date(let format):
                 dateFormatter.dateFormat = format
-                guard let d = dateFormatter.date(from: arg) else { throw E.invalidValue(opt, arg, parameterType, commandPath)}
+                guard let d = dateFormatter.date(from: arg) else { throw invalidValue() }
 
-                return (opt.token, d)
+                return d
 
             default:
-                throw E.invalidValueType(opt, arg, parameterType, commandPath)
+                throw invalidValueType()
             }
         }
 
@@ -206,7 +231,7 @@ public func parse(_ arguments: [String], node: Node) throws -> ParseResults {
         }
     }
 
-    func optionMatches(_ arg: String, options: [Node]) throws -> [Node] {
+    func optionMatch(_ arg: String, options: [Node]) throws -> Node? {
         var matches = [Node]()
 
         if arg.starts(with: "-") {
@@ -223,8 +248,8 @@ public func parse(_ arguments: [String], node: Node) throws -> ParseResults {
             if matches.isEmpty {
                 matches = options.filter {
                     if case let .parameter(opt, _) = $0 {
-                        return ("-" + opt.token).starts(with:arg) ||
-                            ("--" + opt.token).starts(with:arg)
+                        return ("-" + opt.token).starts(with: arg) ||
+                            ("--" + opt.token).starts(with: arg)
                     }
 
                     return false
@@ -235,8 +260,8 @@ public func parse(_ arguments: [String], node: Node) throws -> ParseResults {
             if matches.isEmpty {
                 matches = options.filter {
                     if case let .parameter(opt, _) = $0, case .toggle = opt.type {
-                        return ("-no" + opt.token).starts(with:arg) ||
-                            ("--no" + opt.token).starts(with:arg)
+                        return ("-no" + opt.token).starts(with: arg) ||
+                            ("--no" + opt.token).starts(with: arg)
                     }
 
                     return false
@@ -247,10 +272,10 @@ public func parse(_ arguments: [String], node: Node) throws -> ParseResults {
             else if matches.count > 1 { throw E.ambiguousOption(arg, matches, commandPath) }
         }
 
-        return matches
+        return matches.first
     }
 
-    func _parse(nodes: [Node], from node: Node) throws {
+    func _parse(node: Node) throws {
         let parameters = node.parameters
         let options = node.options
         let commands = node.commands
@@ -264,7 +289,7 @@ public func parse(_ arguments: [String], node: Node) throws -> ParseResults {
         while !arguments.isEmpty && !done {
             let arg = arguments[0]
 
-            if let match = try optionMatches(arg, options: options).first {
+            if let match = try optionMatch(arg, options: options) {
                 arguments.pop()
 
                 if case let .parameter(opt, _) = match {
@@ -277,12 +302,12 @@ public func parse(_ arguments: [String], node: Node) throws -> ParseResults {
 
                         if let v = try value(for: opt, parameterType: .tagged) {
                             if case .array = opt.type {
-                                var a = optionValues[v.0] as? [Any] ?? [Any]()
-                                a.append(v.1)
-                                optionValues[v.0] = a
+                                var a = optionValues[opt.token] as? [Any] ?? [Any]()
+                                a.append(v)
+                                optionValues[opt.token] = a
                             }
                             else {
-                                optionValues[v.0] = v.1
+                                optionValues[opt.token] = v
                             }
                         }
                     }
@@ -290,14 +315,12 @@ public func parse(_ arguments: [String], node: Node) throws -> ParseResults {
             }
             else {
                 for node in commands {
-                    if case let .command(cmd, children) = node {
-                        if cmd.token == arg {
-                            arguments.pop()
+                    if case let .command(cmd, _) = node, cmd.token == arg {
+                        arguments.pop()
 
-                            commandPath.append(node)
+                        commandPath.append(node)
 
-                            try _parse(nodes: children, from: node)
-                        }
+                        try _parse(node: node)
                     }
                 }
 
@@ -314,7 +337,7 @@ public func parse(_ arguments: [String], node: Node) throws -> ParseResults {
                     guard !arguments.isEmpty else { throw E.missingValue(param, .fixed, commandPath) }
 
                     if let v = try value(for: param, parameterType: .fixed) {
-                        parameterValues.append(v.1)
+                        parameterValues.append(v)
                     }
                 }
             }
@@ -325,7 +348,7 @@ public func parse(_ arguments: [String], node: Node) throws -> ParseResults {
         }
     }
 
-    try _parse(nodes: nodes, from: node)
+    try _parse(node: node)
 
     return ParseResults(commandPath: commandPath,
                         parameterValues: parameterValues,
@@ -345,7 +368,9 @@ public func usage(_ path: [Node]) -> String {
         return ""
     }
 
-    var usage = "USAGE: \(path.map { $0.token }.joined(separator: " "))"
+    let pathUsage = path.map { $0.token }.joined(separator: " ")
+
+    var usage = "USAGE: \(pathUsage)"
 
     var optionlist = ""
     var commandlist = ""
