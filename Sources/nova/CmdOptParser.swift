@@ -219,7 +219,7 @@ public func parse(_ arguments: [String], node: Node) throws -> ParseResults {
             }
         }
 
-        let arg = arguments.pop()
+        let arg = arguments.remove(at: 0)
 
         switch opt.type {
         case .array(let type):
@@ -290,7 +290,7 @@ public func parse(_ arguments: [String], node: Node) throws -> ParseResults {
             let arg = arguments[0]
 
             if let match = try optionMatch(arg, options: options) {
-                arguments.pop()
+                arguments.remove(at: 0)
 
                 if case let .parameter(opt, _) = match {
                     if case .toggle = opt.type {
@@ -316,7 +316,7 @@ public func parse(_ arguments: [String], node: Node) throws -> ParseResults {
             else {
                 for node in commands {
                     if case let .command(cmd, _) = node, cmd.token == arg {
-                        arguments.pop()
+                        arguments.remove(at: 0)
 
                         commandPath.append(node)
 
@@ -414,14 +414,4 @@ public func usage(_ path: [Node]) -> String {
     }
 
     return usage + optionlist + commandlist
-}
-
-extension Array where Element == String {
-    @discardableResult
-    mutating func pop() -> String {
-        let s = self[0]
-        remove(at: 0)
-
-        return s
-    }
 }

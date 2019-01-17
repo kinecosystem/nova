@@ -10,10 +10,10 @@ import Foundation
 import StellarKit
 import KinUtil
 
-var node: Stellar.Node!
+var node: StellarKit.Node!
 var whitelist: StellarAccount?
 var xlmIssuer: StellarAccount!
-var asset: StellarKit.Asset?
+var asset: Asset?
 var issuerSeed: String!
 
 enum Commands: String {
@@ -23,6 +23,7 @@ enum Commands: String {
     case whitelist
     case data
     case pay
+    case flood
 }
 
 var path = "./config.json"
@@ -33,6 +34,7 @@ var keyName = ""
 var whitelister: String?
 var percentage: Int?
 var amount: Int?
+var priority = Int32.max
 
 let inputOpt = Node.option("input", description: "specify an input file [default \(file)]")
 
@@ -57,8 +59,10 @@ let root = Node.root(CommandLine.arguments[0], "perform operations on a Horizon 
         ]),
 
     .command("whitelist", description: "manage the whitelist", [
-        .command("add", description: "add a key",
-                 [.parameter("key")]),
+        .command("add", description: "add a key", [
+            .option("priority", type: .int(1...Int(Int32.max)), description: ""),
+            .parameter("key"),
+            ]),
 
         .command("remove", description: "remove a key",
                  [.parameter("key")]),
@@ -78,6 +82,10 @@ let root = Node.root(CommandLine.arguments[0], "perform operations on a Horizon 
         .parameter("destination key", description: "public key of destination account"),
         .parameter("amount", type: .int(nil)),
         ]),
+
+    .command("flood", description: "Flood the network with transactions", [
+        .option("amount", description: "the number of simultaneous requests; defaults to 10"),
+        ])
     ])
 
 let parseResults: ParseResults
@@ -132,7 +140,8 @@ skey = parseResults.first(as: String.self) ?? skey
 keyName = parseResults.last(as: String.self) ?? parseResults["key", String.self] ?? keyName
 whitelister = parseResults["whitelist", String.self]
 percentage = parseResults.last(as: Int.self)
-amount = parseResults.last(as: Int.self)
+amount = parseResults.last(as: Int.self) ?? parseResults["amount", Int.self]
+priority = Int32(parseResults["priority", Int.self] ?? Int(priority))
 
 guard let d = try? Data(contentsOf: URL(fileURLWithPath: path)) else {
     fatalError("Missing configuration")
@@ -142,7 +151,7 @@ do {
     let config = try JSONDecoder().decode(Configuration.self, from: d)
 
     xlmIssuer = StellarAccount(seedStr: config.xlm_issuer)
-    node = Stellar.Node(baseURL: config.horizon_url, networkId: .custom(config.network_id))
+    node = StellarKit.Node(baseURL: config.horizon_url, networkId: .custom(config.network_id))
 
     if let a = config.asset {
         asset = StellarKit.Asset(assetCode: a.code, issuer: a.issuer)
@@ -190,7 +199,12 @@ case .create:
 
         create(accounts: Array(pkeys[i ..< min(i + 100, pkeys.count)]))
             .error({
-                if case CreateAccountError.CREATE_ACCOUNT_ALREADY_EXIST = $0 {
+                if
+                    let results = ($0 as? Responses.RequestFailure)?.transactionResult?.operationResults,
+                    let inner = results[0].tr,
+                    case let .CREATE_ACCOUNT(result) = inner,
+                    result == .alreadyExists
+                {
                     return
                 }
 
@@ -235,12 +249,13 @@ case .whitelist:
 
     switch parseResults.commandPath[2].token {
     case "add":
-        let account = StellarAccount(publickey: param)
-        key = account.publicKey!
-        val = Data(StellarKit.KeyUtils.key(base32: param).suffix(4))
+        let account = StellarAccount(publicKey: param)
+        key = account.publicKey
+        val = Data(StellarKit.KeyUtils.key(base32: param).suffix(4)) //+
+//            withUnsafeBytes(of: priority.bigEndian) { Data($0) }
     case "remove":
-        let account = StellarAccount(publickey: param)
-        key = account.publicKey!
+        let account = StellarAccount(publicKey: param)
+        key = account.publicKey
         val = nil
     case "reserve":
         let reserve = Int32(param)
@@ -251,7 +266,7 @@ case .whitelist:
 
     var waiting = true
 
-    data(account: whitelist, key: key, val: val)
+    data(account: whitelist, key: key, val: val, fee: 0)
         .error { print($0); exit(1) }
         .finally { waiting = false }
 
@@ -262,10 +277,10 @@ case .data:
     let val = parseResults.remainder.count > 0 ? parseResults.remainder[0].data(using: .utf8) : nil
 
     if let val = val {
-        print("Setting data [\(val.hexString)] for [\(keyName)] on account \(account.publicKey!)")
+        print("Setting data [\(val.hexString)] for [\(keyName)] on account \(account.publicKey)")
     }
     else {
-        print("Clearing [\(keyName)] on account \(account.publicKey!)")
+        print("Clearing [\(keyName)] on account \(account.publicKey)")
     }
 
     var waiting = true
@@ -290,4 +305,7 @@ case .pay:
         .finally { waiting = false }
 
     while waiting {}
+
+case .flood:
+    break
 }

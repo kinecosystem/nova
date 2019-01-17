@@ -36,7 +36,7 @@ struct GeneratedPairWrapper: Codable {
 struct StellarAccount: Account {
     private var pubkey: String?
 
-    var publicKey: String? {
+    var publicKey: String {
         return pubkey ?? StellarKit.KeyUtils.base32(publicKey: keyPair.publicKey)
     }
 
@@ -44,25 +44,20 @@ struct StellarAccount: Account {
 
     init(seedStr: String) {
         keyPair = KeyUtils.keyPair(from: seedStr)!
-
-        let secretKey = keyPair.secretKey
-
-        sign = { message in
-            return try KeyUtils.sign(message: message,
-                                     signingKey: secretKey)
-        }
     }
 
-    init(publickey: String) {
+    init(publicKey: String) {
         self.init(seedStr: StellarKit.KeyUtils.base32(seed: KeyUtils.seed()!))
 
-        pubkey = publickey
+        pubkey = publicKey
     }
 
     init() {
         self.init(seedStr: StellarKit.KeyUtils.base32(seed: KeyUtils.seed()!))
     }
 
-    var sign: ((Data) throws -> [UInt8])?
+    func sign(_ message: Data) throws -> [UInt8] {
+        return try KeyUtils.sign(message: message, signingKey: keyPair.secretKey)
+    }
 }
 

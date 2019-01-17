@@ -12,13 +12,13 @@ func printConfig() {
     print(
         """
         Configuration:
-        XLM Issuer: \(xlmIssuer.publicKey!)
+        XLM Issuer: \(xlmIssuer.publicKey)
         Node: \(node.baseURL) [\(node.networkId)]
         """
     )
 
     if let whitelist = whitelist {
-        print("    Whitelist: \(whitelist.publicKey!)")
+        print("    Whitelist: \(whitelist.publicKey)")
     }
 
     if let asset = asset {

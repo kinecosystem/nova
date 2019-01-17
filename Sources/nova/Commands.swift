@@ -19,26 +19,11 @@ struct ErrorMessage: Error, CustomStringConvertible {
 }
 
 func create(accounts: [String]) -> Promise<String> {
-    return Stellar.sequence(account: xlmIssuer.publicKey!, node: node)
-        .then({ sequence -> Promise<String> in
-            let ops = accounts.map({ StellarKit.Operation.createAccount(destination: $0,
-                                                                        balance: 0) })
-            let tx = Transaction(sourceAccount: xlmIssuer.publicKey!,
-                                 seqNum: sequence,
-                                 timeBounds: nil,
-                                 memo: .MEMO_NONE,
-                                 fee: UInt32(ops.count) * 100,
-                                 operations: ops)
-
-            let envelope = try Stellar.sign(transaction: tx,
-                                            signer: xlmIssuer,
-                                            node: node)
-
-            return Stellar.postTransaction(envelope: envelope, node: node)
-        })
-        .then({ _ in
-            print("Created \(accounts.count) accounts")
-        })
+    return TxBuilder(source: xlmIssuer, node: node)
+        .add(operations: accounts.map({ StellarKit.Operation.createAccount(destination: $0,
+                                                                           balance: 0) }))
+        .post()
+        .then { result -> String in print("Created \(accounts.count) accounts"); return result.hash }
 }
 
 func fund(from source: StellarAccount? = nil, accounts: [String], asset: Asset, amount: Int) -> Promise<String> {
@@ -47,35 +32,34 @@ func fund(from source: StellarAccount? = nil, accounts: [String], asset: Asset, 
 
     let builder = TxBuilder(source: issuer, node: node)
         .add(operations: accounts.map({ StellarKit.Operation.payment(destination: $0,
-                                                                     amount: Int64(amount) * 10_000_000,
+                                                                     amount: Int64(amount) * 100_000,
                                                                      asset: asset) }))
+
     if let whitelister = whitelister {
         builder.add(signer: StellarAccount(seedStr: whitelister))
     }
 
     return builder
-        .envelope(networkId: node.networkId.description)
-        .then { envelope -> Promise<String> in
-            return Stellar.postTransaction(envelope: envelope, node: node)
-        }
-        .then({ _ in
-            print("Funded \(accounts.count) accounts")
+        .post()
+        .then({ result -> String in
+            print("Funded \(accounts.count) account(s)")
+            return result.hash
         })
         .mapError({
             return ErrorMessage(message: "Received error while funding account(s): \($0)")
         })
 }
 
-func data(account: StellarAccount, key: String, val: Data?) -> Promise<String> {
-    let builder = TxBuilder(source: account, node: node)
+func data(account: StellarAccount, key: String, val: Data?, fee: UInt32? = nil) -> Promise<String> {
+    return TxBuilder(source: account, node: node)
         .add(operation: StellarKit.Operation.manageData(key: key, value: val))
-
-    return builder.envelope(networkId: node.networkId.description)
-        .then { envelope -> Promise<String> in
-            return Stellar.postTransaction(envelope: envelope, node: node)
+        .set(fee: fee)
+        .post()
+        .then { result -> String in
+            return result.hash
         }
         .then({ _ in
-            print("Set data for \(account.publicKey!)")
+            print("Set data for \(account.publicKey)")
         })
         .mapError({
             return ErrorMessage(message: "Received error while setting data: \($0)")
