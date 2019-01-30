@@ -187,7 +187,7 @@ public func parse(_ arguments: [String], node: Node) throws -> ParseResults {
 
     var (arguments, remainder) = prepare(arguments)
 
-    func value(for opt: Parameter, parameterType: ParameterType) throws -> Any? {
+    func value(arg: String, for opt: Parameter, parameterType: ParameterType) throws -> Any? {
         func checkedValue(_ arg: String, for opt: Parameter, as type: Type) throws -> Any {
             let invalidValue = { E.invalidValue(opt, arg, parameterType, commandPath)}
             let invalidValueType = { E.invalidValue(opt, arg, parameterType, commandPath)}
@@ -218,8 +218,6 @@ public func parse(_ arguments: [String], node: Node) throws -> ParseResults {
                 throw invalidValueType()
             }
         }
-
-        let arg = arguments.remove(at: 0)
 
         switch opt.type {
         case .array(let type):
@@ -300,7 +298,7 @@ public func parse(_ arguments: [String], node: Node) throws -> ParseResults {
                     else {
                         guard !arguments.isEmpty else { throw E.missingValue(opt, .tagged, commandPath) }
 
-                        if let v = try value(for: opt, parameterType: .tagged) {
+                        if let v = try value(arg: arguments.remove(at: 0), for: opt, parameterType: .tagged) {
                             if case .array = opt.type {
                                 var a = optionValues[opt.token] as? [Any] ?? [Any]()
                                 a.append(v)
@@ -336,8 +334,21 @@ public func parse(_ arguments: [String], node: Node) throws -> ParseResults {
                 else {
                     guard !arguments.isEmpty else { throw E.missingValue(param, .fixed, commandPath) }
 
-                    if let v = try value(for: param, parameterType: .fixed) {
-                        parameterValues.append(v)
+                    if case .array = param.type {
+                        let args = arguments.remove(at: 0).split(separator: ",")
+
+                        var values = [Any]()
+                        for arg in args {
+                            if let v = try value(arg: String(arg), for: param, parameterType: .fixed) {
+                                values.append(v)
+                            }
+                        }
+                        parameterValues.append(values)
+                    }
+                    else {
+                        if let v = try value(arg: arguments.remove(at: 0), for: param, parameterType: .fixed) {
+                            parameterValues.append(v)
+                        }
                     }
                 }
             }

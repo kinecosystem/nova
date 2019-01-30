@@ -35,6 +35,7 @@ var whitelister: String?
 var percentage: Int?
 var amount: Int?
 var priority = Int32.max
+var percentages: [Int]?
 
 let inputOpt = Node.option("input", description: "specify an input file [default \(file)]")
 
@@ -59,6 +60,8 @@ let root = Node.root(CommandLine.arguments[0], "perform operations on a Horizon 
         ]),
 
     .command("whitelist", description: "manage the whitelist", [
+        .command("list", description: "list the whitelist contents and configuration", []),
+
         .command("add", description: "add a key", [
             .option("priority", type: .int(1...Int(Int32.max)), description: ""),
             .parameter("key"),
@@ -69,6 +72,10 @@ let root = Node.root(CommandLine.arguments[0], "perform operations on a Horizon 
 
         .command("reserve", description: "set the %capacity to reserve for non-whitelisted accounts",
                  [.parameter("percentage", type: .int(1...100))]),
+
+        .command("priority", description: "set the percentages to allocate across priorities",
+                 [.parameter("level", type: .int(1...20)),
+                  .parameter("percentages", type: .array(.int(1...100)))]),
         ]),
 
     .command("data", description: "manage data on an account", [
@@ -82,10 +89,6 @@ let root = Node.root(CommandLine.arguments[0], "perform operations on a Horizon 
         .parameter("destination key", description: "public key of destination account"),
         .parameter("amount", type: .int(nil)),
         ]),
-
-    .command("flood", description: "Flood the network with transactions", [
-        .option("amount", description: "the number of simultaneous requests; defaults to 10"),
-        ])
     ])
 
 let parseResults: ParseResults
@@ -141,7 +144,8 @@ keyName = parseResults.last(as: String.self) ?? parseResults["key", String.self]
 whitelister = parseResults["whitelist", String.self]
 percentage = parseResults.last(as: Int.self)
 amount = parseResults.last(as: Int.self) ?? parseResults["amount", Int.self]
-priority = Int32(parseResults["priority", Int.self] ?? Int(priority))
+priority = Int32(parseResults["priority", Int.self] ?? parseResults.first(as: Int.self) ?? Int(priority))
+percentages = parseResults.last(as: [Int].self)
 
 guard let d = try? Data(contentsOf: URL(fileURLWithPath: path)) else {
     fatalError("Missing configuration")
@@ -151,7 +155,7 @@ do {
     let config = try JSONDecoder().decode(Configuration.self, from: d)
 
     xlmIssuer = StellarAccount(seedStr: config.xlm_issuer)
-    node = StellarKit.Node(baseURL: config.horizon_url, networkId: .custom(config.network_id))
+    node = StellarKit.Node(baseURL: config.horizon_url, networkId: NetworkId(config.network_id))
 
     if let a = config.asset {
         asset = StellarKit.Asset(assetCode: a.code, issuer: a.issuer)
@@ -165,6 +169,13 @@ do {
 catch {
     print("Unable to parse configuration: \(error)")
 }
+
+func read(_ byteCount: Int, from data: Data, into: UnsafeMutableRawPointer) {
+    data.withUnsafeBytes({ (ptr: UnsafePointer<UInt8>) -> () in
+        memcpy(into, ptr, byteCount)
+    })
+}
+
 
 printConfig()
 
@@ -248,25 +259,82 @@ case .whitelist:
     let val: Data?
 
     switch parseResults.commandPath[2].token {
+    case "list":
+        var waiting = true
+
+        whitelist.details(node: node)
+            .then({ details in
+                let overrides = details.data.filter { $0.0.starts(with: "priority_count_") }
+                let keys = details.data.filter { $0.0.utf8.count == 56 }
+
+                if let reserve = details.data.filter({ $0.0 == "reserve" }).first {
+                    var r = Int32()
+                    read(4, from: Data(base64Encoded: reserve.1)!, into: &r)
+
+                    print("Reserve: \(r.bigEndian)\n")
+                }
+
+                print("Priority overrides")
+                print("------------------")
+                for p in overrides.keys.sorted() {
+                    let v = overrides[p]!
+                    print("  \(p.suffix(2)): \(Array(Data(base64Encoded: v)!))")
+                }
+
+                print("\nKeys                                                        Priority")
+                print("--------------------------------------------------------------------")
+                for k in keys {
+                    var p = ""
+
+                    let d = Data(base64Encoded: k.1)!
+                    if d.count == 8 {
+                        let pd = d.suffix(4)
+                        var pi = Int32()
+                        read(4, from: pd, into: &pi)
+
+                        p = String(describing: pi.bigEndian)
+                    }
+
+                    print("\(k.0)\t\(p)")
+                }
+            })
+            .error { print($0) }
+            .finally { waiting = false }
+
+        while waiting {}
+
+        exit(0)
+
     case "add":
         let account = StellarAccount(publicKey: param)
         key = account.publicKey
-        val = Data(StellarKit.KeyUtils.key(base32: param).suffix(4)) //+
-//            withUnsafeBytes(of: priority.bigEndian) { Data($0) }
+        val = Data(StellarKit.KeyUtils.key(base32: param).suffix(4)) +
+            withUnsafeBytes(of: priority.bigEndian) { Data($0) }
     case "remove":
         let account = StellarAccount(publicKey: param)
         key = account.publicKey
         val = nil
     case "reserve":
-        let reserve = Int32(param)
+        let reserve = Int32(percentage!)
         key = "reserve"
-        val = withUnsafeBytes(of: reserve!.bigEndian) { Data($0) }
+        val = withUnsafeBytes(of: reserve.bigEndian) { Data($0) }
+    case "priority":
+        guard
+            let percentages = percentages,
+            percentages.count == priority
+        else {
+            print("Mismatch between priority level and number of percentages.")
+            exit(1)
+        }
+
+        key = String(format: "priority_count_%02d", priority)
+        val = Data(bytes: percentages.map({ UInt8(clamping: $0) }))
     default: key = ""; val = nil
     }
 
     var waiting = true
 
-    data(account: whitelist, key: key, val: val, fee: 0)
+    data(account: whitelist, key: key, val: val, fee: 100)
         .error { print($0); exit(1) }
         .finally { waiting = false }
 

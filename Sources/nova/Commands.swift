@@ -22,7 +22,8 @@ func create(accounts: [String]) -> Promise<String> {
     return TxBuilder(source: xlmIssuer, node: node)
         .add(operations: accounts.map({ StellarKit.Operation.createAccount(destination: $0,
                                                                            balance: 0) }))
-        .post()
+        .sign()
+        .post(to: node)
         .then { result -> String in print("Created \(accounts.count) accounts"); return result.hash }
 }
 
@@ -40,7 +41,8 @@ func fund(from source: StellarAccount? = nil, accounts: [String], asset: Asset, 
     }
 
     return builder
-        .post()
+        .sign()
+        .post(to: node)
         .then({ result -> String in
             print("Funded \(accounts.count) account(s)")
             return result.hash
@@ -54,7 +56,8 @@ func data(account: StellarAccount, key: String, val: Data?, fee: UInt32? = nil) 
     return TxBuilder(source: account, node: node)
         .add(operation: StellarKit.Operation.manageData(key: key, value: val))
         .set(fee: fee)
-        .post()
+        .sign()
+        .post(to: node)
         .then { result -> String in
             return result.hash
         }
