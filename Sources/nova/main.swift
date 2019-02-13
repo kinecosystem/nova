@@ -364,7 +364,7 @@ case .pay:
 
     let source = StellarAccount(seedStr: skey)
     let destination = parseResults.parameterValues[1] as! String
-    let amount = Int(parseResults.remainder.first ?? "1000") ?? 1000
+    let amount = parseResults.parameterValues.last as? Int ?? 1000
 
     var waiting = true
 
