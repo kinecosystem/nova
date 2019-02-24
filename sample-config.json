@@ -1,0 +1,6 @@
+{
+    "xlm_issuer": "SECRET KEY HERE",
+    "horizon_url": "http://horizon.madlipzfederation.com",
+    "network_id": "Kin Mainnet ; December 2018",
+    "whitelist": "SECRET KEY HERE"
+}
