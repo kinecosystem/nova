@@ -317,8 +317,7 @@ case .whitelist:
     case "add":
         let account = StellarAccount(publicKey: param)
         key = account.publicKey
-        val = Data(StellarKit.KeyUtils.key(base32: param).suffix(4)) +
-            withUnsafeBytes(of: priority.bigEndian) { Data($0) }
+        val = Data(StellarKit.KeyUtils.key(base32: param).suffix(4)) 
     case "remove":
         let account = StellarAccount(publicKey: param)
         key = account.publicKey
