@@ -11,7 +11,7 @@ import StellarKit
 import Sodium
 
 struct Configuration: Decodable {
-    let xlm_issuer: String
+    let funder: String?
     let horizon_url: URL
     let network_id: String
     let asset: Asset?

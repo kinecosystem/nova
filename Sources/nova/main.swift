@@ -36,11 +36,15 @@ var percentage: Int?
 var amount: Int?
 var priority = Int32.max
 var percentages: [Int]?
+var cfgWhitelist: String?
+var cfgFunder: String?
 
 let inputOpt = Node.option("input", description: "specify an input file [default \(file)]")
 
 let root = Node.root(CommandLine.arguments[0], "perform operations on a Horizon node", [
     .option("config", description: "specify a configuration file [default: \(path)]"),
+    .option("cfg-funder", description: "override the funder secret key from the configuration file"),
+    .option("cfg-whitelist", description: "override the whitelist secret key from the configuration file"),
 
     .command("keypairs", description: "create keypairs for use by other commands", [
         .option("output", description: "specify an output file [default \(file)]"),
@@ -146,6 +150,8 @@ percentage = parseResults.last(as: Int.self)
 amount = parseResults.last(as: Int.self) ?? parseResults["amount", Int.self]
 priority = Int32(parseResults["priority", Int.self] ?? parseResults.first(as: Int.self) ?? Int(priority))
 percentages = parseResults.last(as: [Int].self)
+cfgWhitelist = parseResults["cfg-whitelist", String.self]
+cfgFunder = parseResults["cfg-funder", String.self]
 
 guard let d = try? Data(contentsOf: URL(fileURLWithPath: path)) else {
     fatalError("Missing configuration")
@@ -154,7 +160,10 @@ guard let d = try? Data(contentsOf: URL(fileURLWithPath: path)) else {
 do {
     let config = try JSONDecoder().decode(Configuration.self, from: d)
 
-    xlmIssuer = StellarAccount(seedStr: config.xlm_issuer)
+    if let f = (cfgFunder ?? config.funder) {
+        xlmIssuer = StellarAccount(seedStr: f)
+    }
+
     node = StellarKit.Node(baseURL: config.horizon_url, networkId: NetworkId(config.network_id))
 
     if let a = config.asset {
@@ -162,7 +171,7 @@ do {
         issuerSeed = a.issuerSeed
     }
 
-    if let w = config.whitelist {
+    if let w = (cfgWhitelist ?? config.whitelist) {
         whitelist = StellarAccount(seedStr: w)
     }
 }
