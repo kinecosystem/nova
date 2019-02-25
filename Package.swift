@@ -6,7 +6,7 @@ import PackageDescription
 let package = Package(
     name: "nova",
     dependencies: [
-      .package(url: "../kin-core-ios/KinSDK/StellarKit", from: "0.9.0"),
+      .package(url: "https://github.com/avi-kik/StellarKit.git", from: "0.9.0"),
       .package(url: "https://github.com/jedisct1/swift-sodium.git", from: "0.7.0"),
     ],
     targets: [
