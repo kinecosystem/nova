@@ -9,6 +9,7 @@
 import Foundation
 import StellarKit
 import KinUtil
+import Gzip
 
 var node: StellarKit.Node!
 var whitelist: StellarAccount?
@@ -23,7 +24,7 @@ enum Commands: String {
     case whitelist
     case data
     case pay
-    case flood
+    case dump
 }
 
 var path = "./config.json"
@@ -93,6 +94,10 @@ let root = Node.root(CommandLine.arguments[0], "perform operations on a Horizon 
         .parameter("destination key", description: "public key of destination account"),
         .parameter("amount", type: .int(nil)),
         ]),
+
+    .command("dump", description: "dump an xdr file from a history archive as JSON.", [
+        .parameter("file", description: "the file to dump.  May be gzipped."),
+        ]),
     ])
 
 let parseResults: ParseResults
@@ -142,6 +147,7 @@ catch let error as CmdOptParseErrors {
 path = parseResults["config", String.self] ?? path
 file = parseResults["input", String.self] ?? file
 file = parseResults["output", String.self] ?? file
+file = parseResults.last(as: String.self) ?? file
 param = parseResults.first(as: String.self) ?? param
 skey = parseResults.first(as: String.self) ?? skey
 keyName = parseResults.last(as: String.self) ?? parseResults["key", String.self] ?? keyName
@@ -153,30 +159,28 @@ percentages = parseResults.last(as: [Int].self)
 cfgWhitelist = parseResults["cfg-whitelist", String.self]
 cfgFunder = parseResults["cfg-funder", String.self]
 
-guard let d = try? Data(contentsOf: URL(fileURLWithPath: path)) else {
-    fatalError("Missing configuration")
-}
-
-do {
-    let config = try JSONDecoder().decode(Configuration.self, from: d)
-
-    if let f = (cfgFunder ?? config.funder) {
-        xlmIssuer = StellarAccount(seedStr: f)
+if let d = try? Data(contentsOf: URL(fileURLWithPath: path)) {
+    do {
+        let config = try JSONDecoder().decode(Configuration.self, from: d)
+        
+        if let f = (cfgFunder ?? config.funder) {
+            xlmIssuer = StellarAccount(seedStr: f)
+        }
+        
+        node = StellarKit.Node(baseURL: config.horizon_url, networkId: NetworkId(config.network_id))
+        
+        if let a = config.asset {
+            asset = StellarKit.Asset(assetCode: a.code, issuer: a.issuer)
+            issuerSeed = a.issuerSeed
+        }
+        
+        if let w = (cfgWhitelist ?? config.whitelist) {
+            whitelist = StellarAccount(seedStr: w)
+        }
     }
-
-    node = StellarKit.Node(baseURL: config.horizon_url, networkId: NetworkId(config.network_id))
-
-    if let a = config.asset {
-        asset = StellarKit.Asset(assetCode: a.code, issuer: a.issuer)
-        issuerSeed = a.issuerSeed
+    catch {
+        print("Unable to parse configuration: \(error)")
     }
-
-    if let w = (cfgWhitelist ?? config.whitelist) {
-        whitelist = StellarAccount(seedStr: w)
-    }
-}
-catch {
-    print("Unable to parse configuration: \(error)")
 }
 
 func read(_ byteCount: Int, from data: Data, into: UnsafeMutableRawPointer) {
@@ -185,10 +189,11 @@ func read(_ byteCount: Int, from data: Data, into: UnsafeMutableRawPointer) {
     })
 }
 
-
-printConfig()
-
 let command = Commands(rawValue: parseResults.commandPath[1].token)!
+
+if command != .dump {
+    printConfig()
+}
 
 switch command {
 case .keypairs:
@@ -382,6 +387,46 @@ case .pay:
 
     while waiting {}
 
-case .flood:
-    break
+case .dump:
+    do {
+        let data = try Data(contentsOf: URL(fileURLWithPath: file))
+        let uncompressed = file.hasSuffix(".gz")
+            ? try data.gunzipped()
+            : data
+
+        let jsonEnc = JSONEncoder()
+        jsonEnc.outputFormatting = .prettyPrinted
+
+        let filename = file.split(separator: "/").last!
+        if filename.starts(with: "ledger-") {
+            let results: [LedgerHeaderHistoryEntry] = try parse(data: uncompressed)
+
+            let json = try jsonEnc.encode(results)
+            print(String(bytes: json, encoding: .utf8)!)
+        }
+        else if filename.starts(with: "transactions-") {
+            let results: [TransactionHistoryEntry] = try parse(data: uncompressed)
+
+            let json = try jsonEnc.encode(results)
+            print(String(bytes: json, encoding: .utf8)!)
+        }
+        else if filename.starts(with: "results-") {
+            let results: [TransactionHistoryResultEntry] = try parse(data: uncompressed)
+
+            let json = try jsonEnc.encode(results)
+            print(String(bytes: json, encoding: .utf8)!)
+        }
+        else if filename.starts(with: "bucket-") {
+            let results: [BucketEntry] = try parse(data: uncompressed)
+
+            let json = try jsonEnc.encode(results)
+            print(String(bytes: json, encoding: .utf8)!)
+        }
+        else {
+            print("Unknown archive type.")
+        }
+    }
+    catch {
+        print(error)
+    }
 }

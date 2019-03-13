@@ -18,6 +18,7 @@
 |`whitelist`|manage the whitelist|
 |`data`|manage data on an account|
 |`pay`|send a payment between accounts|
+|`dump`|print an archive file as JSON|
 
 ### keypairs
 
@@ -102,4 +103,21 @@ nova -config=./federation-config.json whitelist remove GC3Y3Y7DJ3J6PGNHI5KBUO7AX
 ```bash
 # reserve up-to 13% of available slots for non-whitelisted transactions
 nova -config=./federation-config.json whitelist reserve 13
+```
+
+### dump
+The `dump` command prints the specified archive file as a JSON object.  The command supports the following file types: ledger, transactions, results, bucket.  The type is determined by the file name, and must be one of the following forms:
+
+- `ledger-.*`
+- `transactions-.*`
+- `results-.*`
+- `bucket-.*`
+
+If the filename ends in `.gz`, the file must be gzip-compressed.
+
+##### Examples
+
+```bash
+# dump a transactions history file
+nova dump transactions-000cf87f.xdr.gz
 ```

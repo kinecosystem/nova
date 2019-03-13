@@ -8,10 +8,11 @@ let package = Package(
     dependencies: [
       .package(url: "https://github.com/avi-kik/StellarKit.git", from: "0.9.0"),
       .package(url: "https://github.com/jedisct1/swift-sodium.git", from: "0.7.0"),
+      .package(url: "https://github.com/1024jp/GzipSwift", from: "4.1.0"),
     ],
     targets: [
         .target(
             name: "nova",
-            dependencies: ["Sodium", "StellarKit"]),
+            dependencies: ["Sodium", "StellarKit", "Gzip"]),
     ]
 )
