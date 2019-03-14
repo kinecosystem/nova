@@ -1,6 +1,9 @@
 language: swift
 osx_image: xcode10.1
 
+before_script:
+  - brew update && brew install libsodium
+
 script:
   - swift package update
   - swift build
