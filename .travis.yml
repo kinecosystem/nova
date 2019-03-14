@@ -1,9 +1,16 @@
 language: swift
 osx_image: xcode10.1
-
 before_script:
-  - brew update && brew install libsodium
-
+- brew update && brew install libsodium
 script:
-  - swift package update
-  - swift build --static-swift-stdlib -c release
+- swift package update
+- swift build --static-swift-stdlib -c release
+deploy:
+  overwrite: true
+  provider: releases
+  api_key:
+    secure: A2nnurW3SnoaPVJlenl18L7ZbZlODC3uTfiK8p98aa3YV3xJgckw+zi3+Alqkhd058EHb01H97E5h1AdNx8XQjq729d3uPEAjgk+w12wSY4F6nx2Wqyd5qBNB7PkeTk4Ho8nuvgCPYOTZk66QKTDczDI+mQrMsqSot5G2u0arlTw1zGx+0kUgkS0RTq7lu/TlLaZb1BIebJhakXwEasVNjwezVI5+iPul7xbTApV4BnYSu85L8nbBQpeoFOkQ7jn6L5YnfNVgHCWcywSOlE9GqHXanqJDR3IWrMPiCEER/+K3PV/9zCMcOSFpXh6eVa0TtIQR7ITgMDp4mUQaQOuIxiyXjwEuP142jorYDV5wf/jXiLQRDVbP6kBuNk4p8Uu/mHJ5Edq0/W+PSD8jO9lA3z9GWV1qyNav9sHDsUn634bPIS4Y/sI9sEt+TyhTHpvumuR+oOVjuF6izPk7cw2Z3D3RbGpHnP3PCxoZveFJJqPhSOJFkaBkF9QwxJ6svruJx0FrAuDYAeLn1S4hK4xM/oPTAXdLRv1sTo7yei4mbQsrpdZ/VPoo4l66Eekychm6wXMSDsbg8OE7YUCmm6xqd3j5A44dsExXqa7ZVU6iwRoHe24B2EuN78zrizcN8BfOhE9mXz++91hKd/jF2Tv2FGea8Gz8OckZXuAN8JWro8=
+  file: ".build/release/nova"
+  on:
+    repo: kinecosystem/nova
+    branch: travis
