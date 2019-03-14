@@ -6,4 +6,4 @@ before_script:
 
 script:
   - swift package update
-  - swift build
+  - swift build --static-swift-stdlib -c release
