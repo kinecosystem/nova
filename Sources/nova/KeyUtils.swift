@@ -42,8 +42,10 @@ public struct KeyUtils {
         guard let seed = sodium
             .secretBox
             .open(nonceAndAuthenticatedCipherText: encryptedSeedData.array,
-                  secretKey: skey) else {
-                    throw KeyUtilsError.passphraseIncorrect
+                  secretKey: skey)
+            else
+        {
+            throw KeyUtilsError.passphraseIncorrect
         }
 
         return seed

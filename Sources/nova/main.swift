@@ -25,6 +25,8 @@ enum Commands: String {
     case data
     case pay
     case dump
+    case flood
+    case seed
 }
 
 var path = "./config.json"
@@ -95,8 +97,16 @@ let root = Node.root(CommandLine.arguments[0], "perform operations on a Horizon 
         .parameter("amount", type: .int(nil)),
         ]),
 
-    .command("dump", description: "dump an xdr file from a history archive as JSON.", [
-        .parameter("file", description: "the file to dump.  May be gzipped."),
+    .command("dump", description: "dump an xdr file from a history archive as JSON", [
+        .parameter("file", description: "the file to dump.  May be gzipped"),
+        ]),
+
+    .command("flood", description: "flood the network with CREATE_ACCOUNT requests", [
+        .parameter("amount", type: .int(nil)),
+        ]),
+
+    .command("seed", description: "generate network seed from passphrase", [
+        .parameter("passphrase", type: .string),
         ]),
     ])
 
@@ -162,18 +172,18 @@ cfgFunder = parseResults["cfg-funder", String.self]
 if let d = try? Data(contentsOf: URL(fileURLWithPath: path)) {
     do {
         let config = try JSONDecoder().decode(Configuration.self, from: d)
-        
+
         if let f = (cfgFunder ?? config.funder) {
             xlmIssuer = StellarAccount(seedStr: f)
         }
-        
+
         node = StellarKit.Node(baseURL: config.horizon_url, networkId: NetworkId(config.network_id))
-        
+
         if let a = config.asset {
             asset = StellarKit.Asset(assetCode: a.code, issuer: a.issuer)
             issuerSeed = a.issuerSeed
         }
-        
+
         if let w = (cfgWhitelist ?? config.whitelist) {
             whitelist = StellarAccount(seedStr: w)
         }
@@ -191,7 +201,7 @@ func read(_ byteCount: Int, from data: Data, into: UnsafeMutableRawPointer) {
 
 let command = Commands(rawValue: parseResults.commandPath[1].token)!
 
-if command != .dump {
+if command != .dump && command != .seed {
     printConfig()
 }
 
@@ -429,4 +439,11 @@ case .dump:
     catch {
         print(error)
     }
+
+case .flood:
+    flood(amount ?? 100)
+
+case .seed:
+    let sha = param.data(using: .utf8)!.sha256
+    print("Seed: \(StellarKit.KeyUtils.base32(seed: sha.array))")
 }

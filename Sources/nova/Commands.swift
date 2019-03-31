@@ -21,7 +21,7 @@ struct ErrorMessage: Error, CustomStringConvertible {
 func create(accounts: [String]) -> Promise<String> {
     return TxBuilder(source: xlmIssuer, node: node)
         .add(operations: accounts.map({ StellarKit.Operation.createAccount(destination: $0,
-                                                                           balance: 0) }))
+                                                                           balance: 1000000000) }))
         .signedEnvelope()
         .post(to: node)
         .then { result -> String in print("Created \(accounts.count) accounts"); return result.hash }
@@ -67,4 +67,25 @@ func data(account: StellarAccount, key: String, val: Data?, fee: UInt32? = nil) 
         .mapError({
             return ErrorMessage(message: "Received error while setting data: \($0)")
         })
+}
+
+func flood(_ opsPerTx: Int) {
+    let requestor = Horizon()
+    
+    while true {
+        _ =
+            TxBuilder(source: xlmIssuer, node: node)
+                .set(fee: UInt32(100 * opsPerTx))
+                .add(operations: (0 ..< opsPerTx).compactMap { _ in
+                    if let seed = KeyUtils.seed(), let keypair = KeyUtils.keyPair(from: seed) {
+                        return StellarKit.Operation
+                            .createAccount(destination: StellarKit.KeyUtils.base32(publicKey: keypair.publicKey),
+                                           balance: 123)
+                    }
+
+                    return nil
+                })
+                .signedEnvelope()
+                .post(to: node, using: requestor)
+    }
 }
