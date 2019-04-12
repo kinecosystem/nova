@@ -38,33 +38,34 @@ func read(input: String) throws -> [GeneratedPair] {
     return pairs
 }
 
-func parse<T: XDRDecodable>(data: Data) throws -> [T] {
-    var results = [T]()
-
+func chunkArchiveData(_ data: Data, closure: (Data) throws -> ()) throws {
     var cursor: UInt32 = 4
 
     var count = try XDRDecoder(data: data[..<4]).decode(UInt32.self)
     count &= 0x7fffffff
 
     while true {
-        let decoder = XDRDecoder(data: Data(data[cursor ..< cursor + count]))
-        results.append(try T.self.init(from: decoder))
+        try closure(data[cursor ..< cursor + count])
 
         cursor += count
 
         if cursor == data.count { break }
 
-        count = try XDRDecoder(data: Data(data[cursor ..< cursor + 4])).decode(UInt32.self)
+        count = try XDRDecoder(data: data[cursor ..< cursor + 4])
+            .decode(UInt32.self)
         count &= 0x7fffffff
 
         cursor += 4
     }
-
-    return results
 }
 
-extension Data {
-    var sha256: Data {
-        return Data(bytes: SHA256([UInt8](self)).digest())
+func parse<T: XDRDecodable>(data: Data) throws -> [T] {
+    var results = [T]()
+
+    try chunkArchiveData(data) {
+        let decoder = XDRDecoder(data: $0)
+        results.append(try T.self.init(from: decoder))
     }
+
+    return results
 }
