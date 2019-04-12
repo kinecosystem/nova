@@ -180,7 +180,7 @@ if let d = try? Data(contentsOf: URL(fileURLWithPath: path)) {
         node = StellarKit.Node(baseURL: config.horizon_url, networkId: NetworkId(config.network_id))
 
         if let a = config.asset {
-            asset = StellarKit.Asset(assetCode: a.code, issuer: a.issuer)
+            asset = StellarKit.Asset(assetCode: a.code, issuer: StellarKey(a.issuer)!)
             issuerSeed = a.issuerSeed
         }
 
@@ -213,10 +213,10 @@ case .keypairs:
     print("Generating \(count) keys.")
     for _ in 0 ..< count {
         if let seed = KeyUtils.seed(), let keypair = KeyUtils.keyPair(from: seed) {
-            let pkey = StellarKit.KeyUtils.base32(publicKey: keypair.publicKey)
-            let seed = StellarKit.KeyUtils.base32(seed: seed)
+            let pkey = StellarKey(keypair.publicKey, type: .ed25519PublicKey)
+            let seed = StellarKey(seed, type: .ed25519SecretSeed)
 
-            pairs.append(GeneratedPair(address: pkey, seed: seed))
+            pairs.append(GeneratedPair(address: pkey.description, seed: seed.description))
         }
     }
 
@@ -332,7 +332,7 @@ case .whitelist:
     case "add":
         let account = StellarAccount(publicKey: param)
         key = account.publicKey
-        val = Data(StellarKit.KeyUtils.key(base32: param).suffix(4)) 
+        val = Data(account.stellarKey.key.suffix(4))
     case "remove":
         let account = StellarAccount(publicKey: param)
         key = account.publicKey
@@ -445,5 +445,5 @@ case .flood:
 
 case .seed:
     let sha = param.data(using: .utf8)!.sha256
-    print("Seed: \(StellarKit.KeyUtils.base32(seed: sha.array))")
+    print("Seed: \(StellarKey(sha, type: .ed25519SecretSeed))")
 }

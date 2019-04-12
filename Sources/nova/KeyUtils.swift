@@ -25,7 +25,7 @@ public struct KeyUtils {
     }
 
     public static func keyPair(from seed: String) -> Sign.KeyPair? {
-        return Sodium().sign.keyPair(seed: StellarKit.KeyUtils.key(base32: seed))
+        return Sodium().sign.keyPair(seed: StellarKey(seed)!.key)
     }
 
     public static func seed(from passphrase: String,

@@ -34,30 +34,45 @@ struct GeneratedPairWrapper: Codable {
 }
 
 struct StellarAccount: Account {
-    private var pubkey: String?
-
-    var publicKey: String {
-        return pubkey ?? StellarKit.KeyUtils.base32(publicKey: keyPair.publicKey)
-    }
-
+    let stellarKey: StellarKey
     let keyPair: Sign.KeyPair
 
+    var publicKey: String {
+        if stellarKey.type == .ed25519PublicKey {
+            return stellarKey.description
+        }
+        
+        return StellarKey(keyPair.publicKey).description
+    }
+
+    func sign<S>(_ message: S) throws -> [UInt8] where S : Sequence, S.Element == UInt8 {
+        return try KeyUtils.sign(message: Data(message), signingKey: keyPair.secretKey)
+    }
+
+    init(stellarKey: StellarKey) {
+        self.stellarKey = stellarKey
+
+        if stellarKey.type == .ed25519SecretSeed {
+            keyPair = KeyUtils.keyPair(from: stellarKey.description)!
+        }
+        else {
+            keyPair = KeyUtils.keyPair(from: KeyUtils.seed()!)!
+        }
+    }
+
     init(seedStr: String) {
+        stellarKey = StellarKey(seedStr)!
         keyPair = KeyUtils.keyPair(from: seedStr)!
     }
 
     init(publicKey: String) {
-        self.init(seedStr: StellarKit.KeyUtils.base32(seed: KeyUtils.seed()!))
-
-        pubkey = publicKey
+        stellarKey = StellarKey(publicKey)!
+        keyPair = KeyUtils.keyPair(from: KeyUtils.seed()!)!
     }
 
     init() {
-        self.init(seedStr: StellarKit.KeyUtils.base32(seed: KeyUtils.seed()!))
-    }
-
-    func sign(_ message: Data) throws -> [UInt8] {
-        return try KeyUtils.sign(message: message, signingKey: keyPair.secretKey)
+        stellarKey = StellarKey(KeyUtils.seed()!, type: .ed25519SecretSeed)
+        keyPair = KeyUtils.keyPair(from: stellarKey.key)!
     }
 }
 

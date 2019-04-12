@@ -20,7 +20,7 @@ struct ErrorMessage: Error, CustomStringConvertible {
 
 func create(accounts: [String]) -> Promise<String> {
     return TxBuilder(source: xlmIssuer, node: node)
-        .add(operations: accounts.map({ StellarKit.Operation.createAccount(destination: $0,
+        .add(operations: accounts.map({ StellarKit.Operation.createAccount(destination: StellarKey($0)!,
                                                                            balance: 1000000000) }))
         .signedEnvelope()
         .post(to: node)
@@ -32,7 +32,7 @@ func fund(from source: StellarAccount? = nil, accounts: [String], asset: Asset, 
         (asset == .ASSET_TYPE_NATIVE ? xlmIssuer! : StellarAccount(seedStr: issuerSeed))
 
     let builder = TxBuilder(source: issuer, node: node)
-        .add(operations: accounts.map({ StellarKit.Operation.payment(destination: $0,
+        .add(operations: accounts.map({ StellarKit.Operation.payment(destination: StellarKey($0)!,
                                                                      amount: Int64(amount) * 100_000,
                                                                      asset: asset) }))
 
@@ -79,7 +79,7 @@ func flood(_ opsPerTx: Int) {
                 .add(operations: (0 ..< opsPerTx).compactMap { _ in
                     if let seed = KeyUtils.seed(), let keypair = KeyUtils.keyPair(from: seed) {
                         return StellarKit.Operation
-                            .createAccount(destination: StellarKit.KeyUtils.base32(publicKey: keypair.publicKey),
+                            .createAccount(destination: StellarKey(keypair.publicKey),
                                            balance: 123)
                     }
 
