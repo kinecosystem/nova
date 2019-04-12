@@ -23,10 +23,12 @@ typealias E = CmdOptParseErrors
 public indirect enum Type {
     case string
     case int(ClosedRange<Int>?)
+    case double
     case bool
     case date(format: String)
     case array(Type)
     case toggle
+    case custom((String) -> Any?)
 }
 
 public enum ParameterType {
@@ -156,13 +158,12 @@ public extension ParseResults {
 private let dateFormatter = DateFormatter()
 
 private func prepare(_ args: [String]) -> ([String], [String]) {
-    var remainder = [String]()
-    if let index = args.firstIndex(of: "--"), index != args.endIndex - 1 {
-        remainder = Array(args[(index + 1)...])
-    }
+    let remainderIndex = args.firstIndex(of: "--") ?? args.endIndex
+    let remainder = Array(args[remainderIndex ..< args.endIndex].dropFirst())
 
-    return (Array(args[0 ..< (args.firstIndex(of: "--") ?? args.endIndex)])
-        .map { (a) -> [String] in
+    return (Array(args[0 ..< remainderIndex])
+        .map { $0.starts(with: "--") ? String($0.dropFirst()) : $0 }
+        .map { a -> [String] in
             if
                 a.starts(with: "-"),
                 let eqIndex = a.firstIndex(of: "="),
@@ -189,8 +190,8 @@ public func parse(_ arguments: [String], node: Node) throws -> ParseResults {
 
     func value(arg: String, for opt: Parameter, parameterType: ParameterType) throws -> Any? {
         func checkedValue(_ arg: String, for opt: Parameter, as type: Type) throws -> Any {
-            let invalidValue = { E.invalidValue(opt, arg, parameterType, commandPath)}
-            let invalidValueType = { E.invalidValue(opt, arg, parameterType, commandPath)}
+            let invalidValue = { E.invalidValue(opt, arg, parameterType, commandPath) }
+            let invalidValueType = { E.invalidValue(opt, arg, parameterType, commandPath) }
 
             switch type {
             case .string:
@@ -203,6 +204,11 @@ public func parse(_ arguments: [String], node: Node) throws -> ParseResults {
 
                 return i
 
+            case .double:
+                guard let d = Double(arg) else { throw invalidValueType() }
+
+                return d
+
             case .bool:
                 guard let b = Bool(arg) else { throw invalidValueType() }
 
@@ -213,6 +219,11 @@ public func parse(_ arguments: [String], node: Node) throws -> ParseResults {
                 guard let d = dateFormatter.date(from: arg) else { throw invalidValue() }
 
                 return d
+
+            case .custom(let block):
+                guard let v = block(arg) else { throw invalidValueType() }
+
+                return v
 
             default:
                 throw invalidValueType()
@@ -233,10 +244,12 @@ public func parse(_ arguments: [String], node: Node) throws -> ParseResults {
         var matches = [Node]()
 
         if arg.starts(with: "-") {
+            let arg = arg.dropFirst()
+
             // Exact match
             matches = options.filter {
                 if case let .parameter(opt, _) = $0 {
-                    return "-" + opt.token == arg || "--" + opt.token == arg
+                    return opt.token == arg
                 }
 
                 return false
@@ -246,8 +259,7 @@ public func parse(_ arguments: [String], node: Node) throws -> ParseResults {
             if matches.isEmpty {
                 matches = options.filter {
                     if case let .parameter(opt, _) = $0 {
-                        return ("-" + opt.token).starts(with: arg) ||
-                            ("--" + opt.token).starts(with: arg)
+                        return opt.token.starts(with: arg)
                     }
 
                     return false
@@ -258,16 +270,15 @@ public func parse(_ arguments: [String], node: Node) throws -> ParseResults {
             if matches.isEmpty {
                 matches = options.filter {
                     if case let .parameter(opt, _) = $0, case .toggle = opt.type {
-                        return ("-no" + opt.token).starts(with: arg) ||
-                            ("--no" + opt.token).starts(with: arg)
+                        return ("no" + opt.token).starts(with: arg)
                     }
 
                     return false
                 }
             }
 
-            if matches.count == 0 { throw E.unknownOption(arg, commandPath) }
-            else if matches.count > 1 { throw E.ambiguousOption(arg, matches, commandPath) }
+            if matches.count == 0 { throw E.unknownOption("-" + arg, commandPath) }
+            else if matches.count > 1 { throw E.ambiguousOption("-" + arg, matches, commandPath) }
         }
 
         return matches.first
@@ -278,9 +289,8 @@ public func parse(_ arguments: [String], node: Node) throws -> ParseResults {
         let options = node.options
         let commands = node.commands
 
-        guard parameters.isEmpty || commands.isEmpty else {
-            throw E.mutualExclusivityViolation(node)
-        }
+        precondition(parameters.isEmpty || commands.isEmpty,
+                     "A node must define either parameters or commands, but not both")
 
         var done = false
 
@@ -293,7 +303,7 @@ public func parse(_ arguments: [String], node: Node) throws -> ParseResults {
                 if case let .parameter(opt, _) = match {
                     if case .toggle = opt.type {
                         optionValues[opt.token] =
-                            !arg.starts(with: "-no") && !arg.starts(with: "--no")
+                            !arg.starts(with: "-no")
                     }
                     else {
                         guard !arguments.isEmpty else { throw E.missingValue(opt, .tagged, commandPath) }
