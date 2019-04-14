@@ -36,7 +36,7 @@ func fund(from source: StellarAccount? = nil, accounts: [String], asset: Asset, 
                                                                      amount: Int64(amount) * 100_000,
                                                                      asset: asset) }))
 
-    if let whitelister = whitelister {
+    if let whitelister = cnf.whitelister {
         builder.add(signer: StellarAccount(seedStr: whitelister))
     }
 

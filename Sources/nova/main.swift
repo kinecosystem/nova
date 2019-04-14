@@ -25,90 +25,96 @@ enum Commands: String {
     case data
     case pay
     case dump
-    case flood
     case seed
 }
 
-var path = "./config.json"
-var file = "keypairs.json"
-var param = ""
-var skey = ""
-var keyName = ""
-var whitelister: String?
-var percentage: Int?
-var amount: Int?
-var priority = Int32.max
-var percentages: [Int]?
-var cfgWhitelist: String?
-var cfgFunder: String?
+let path = "./config.json"
+let file = "keypairs.json"
 
-let inputOpt = Node.option("input", description: "specify an input file [default \(file)]")
+class Config {
+    var path: String!
+    var file: String!
+    var passphrase: String!
+    var whitelistOverride: String?
+    var funderOverride: String?
+    var amount: Int!
+    var skey: String!
+    var whitelister: String?
+    var percentages: [Int]?
+    var percentage: Int!
+    var priority = Int32.max
+    var keyName = ""
+}
 
-let root = Node.root(CommandLine.arguments[0], "perform operations on a Horizon node", [
-    .option("config", description: "specify a configuration file [default: \(path)]"),
-    .option("cfg-funder", description: "override the funder secret key from the configuration file"),
-    .option("cfg-whitelist", description: "override the whitelist secret key from the configuration file"),
+let cnf = Config()
 
-    .command("keypairs", description: "create keypairs for use by other commands", [
-        .option("output", description: "specify an output file [default \(file)]"),
-        .parameter("amount", type: .int(nil)),
-        ]),
+let root = Root(CommandLine.arguments[0], description: "perform operations on a Horizon node", bindTarget: cnf)
+    .option("config", description: "specify a configuration file [default: \(path)]", binding: \Config.path)
+    .option("cfg-funder",
+            description: "override the funder secret key from the configuration file",
+            binding: \Config.funderOverride)
+    .option("cfg-whitelist",
+            description: "override the whitelist secret key from the configuration file",
+            binding: \Config.whitelistOverride)
 
-    .command("create", description: "create accounts", [
-        inputOpt,
-        .option("key", description: "public key of the account to fund"),
-        ]),
+root
+    .command("keypairs", description: "create keypairs for use by other commands") {
+        $0
+            .option("output", description: "specify an output file [default \(file)]", binding: \Config.file)
+            .parameter("amount", type: .int(nil), binding: \Config.amount)
+    }
+    .command("create", description: "create accounts") {
+        $0
+            .option("input", description: "specify an input file [default \(file)]", binding: \Config.file)
+            .option("key", description: "public key of the account to fund", binding: \Config.keyName)
+    }
+    .command("fund", description: "fund accounts, using the configured asset, if any") {
+        $0
+            .option("input", description: "specify an input file [default \(file)]", binding: \Config.file)
+            .option("whitelist", description: "key with which to whitelist the tx", binding: \Config.whitelister)
+            .option("key", description: "public key of the account to fund", binding: \Config.keyName)
+            .parameter("amount", type: .int(nil), binding: \Config.amount)
+    }
+    .command("whitelist", description: "manage the whitelist") {
+        $0.command("list", description: "list the whitelist contents and configuration")
 
-    .command("fund", description: "fund accounts, using the configured asset, if any", [
-        inputOpt,
-        .option("whitelist", description: "key with which to whitelist the tx"),
-        .option("key", description: "public key of the account to fund"),
-        .parameter("amount", type: .int(nil)),
-        ]),
+        $0.command("add", description: "add a key") {
+            $0
+                .option("priority", type: .int(1...Int(Int32.max)), description: "", binding: \Config.priority)
+                .parameter("key", binding: \Config.keyName)
+        }
 
-    .command("whitelist", description: "manage the whitelist", [
-        .command("list", description: "list the whitelist contents and configuration", []),
+        $0.command("remove", description: "remove a key") {
+            $0.parameter("key", binding: \Config.keyName)
+        }
 
-        .command("add", description: "add a key", [
-            .option("priority", type: .int(1...Int(Int32.max)), description: ""),
-            .parameter("key"),
-            ]),
+        $0.command("reserve", description: "set the %capacity to reserve for non-whitelisted accounts") {
+            $0.parameter("percentage", type: .int(1...100), binding: \Config.percentage)
+        }
 
-        .command("remove", description: "remove a key",
-                 [.parameter("key")]),
-
-        .command("reserve", description: "set the %capacity to reserve for non-whitelisted accounts",
-                 [.parameter("percentage", type: .int(1...100))]),
-
-        .command("priority", description: "set the percentages to allocate across priorities",
-                 [.parameter("level", type: .int(1...20)),
-                  .parameter("percentages", type: .array(.int(1...100)))]),
-        ]),
-
-    .command("data", description: "manage data on an account", [
-        .parameter("secret key", description: "secret key of account to manage"),
-        .parameter("key name", description: "key of data item"),
-        ]),
-
-    .command("pay", description: "send payment to the specified account", [
-        .option("whitelist", description: "key with which to whitelist the tx"),
-        .parameter("secret key", description: "secret key of source account"),
-        .parameter("destination key", description: "public key of destination account"),
-        .parameter("amount", type: .int(nil)),
-        ]),
-
-    .command("dump", description: "dump an xdr file from a history archive as JSON", [
-        .parameter("file", description: "the file to dump.  May be gzipped"),
-        ]),
-
-    .command("flood", description: "flood the network with CREATE_ACCOUNT requests", [
-        .parameter("amount", type: .int(nil)),
-        ]),
-
-    .command("seed", description: "generate network seed from passphrase", [
-        .parameter("passphrase", type: .string),
-        ]),
-    ])
+        $0.command("priority", description: "set the percentages to allocate across priorities") {
+            $0
+                .parameter("level", type: .int(1...20), binding: \Config.priority)
+                .parameter("percentages", type: .array(.int(1...100)), binding: \Config.percentages)
+        }
+    }
+    .command("data", description: "manage data on an account") {
+        $0.parameter("secret key", description: "secret key of account to manage", binding: \Config.skey)
+        $0.parameter("key name", description: "key of data item", binding: \Config.keyName)
+    }
+    .command("pay", description: "send payment to the specified account") {
+        $0
+            .option("whitelist", description: "key with which to whitelist the tx", binding: \Config.whitelister)
+            .parameter("secret key", description: "secret key of source account", binding: \Config.skey)
+            .parameter("destination key", description: "public key of destination account", binding: \Config.keyName)
+            .parameter("amount", type: .int(nil), binding: \Config.amount)
+    }
+    .command("dump", description: "dump an xdr file from a history archive as JSON") {
+        $0.parameter("file", description: "the file to dump.  May be gzipped", binding: \Config.file)
+    }
+    .command("seed", description: "generate network seed from passphrase") {
+        $0.parameter("passphrase", binding: \Config.passphrase)
+}
 
 let parseResults: ParseResults
 do {
@@ -123,7 +129,7 @@ catch let error as CmdOptParseErrors {
     case .ambiguousOption(let (str, possibilities, path)):
         print("Ambiguous option: \(str)")
         print("Possible matches: " + possibilities.compactMap {
-            if case let Node.parameter(opt, _) = $0 {
+            if let opt = ($0 as? ParameterNode)?.parameter {
                 return "-" + opt.token
             }
 
@@ -154,26 +160,11 @@ catch let error as CmdOptParseErrors {
     exit(1)
 }
 
-path = parseResults["config", String.self] ?? path
-file = parseResults["input", String.self] ?? file
-file = parseResults["output", String.self] ?? file
-file = parseResults.last(as: String.self) ?? file
-param = parseResults.first(as: String.self) ?? param
-skey = parseResults.first(as: String.self) ?? skey
-keyName = parseResults.last(as: String.self) ?? parseResults["key", String.self] ?? keyName
-whitelister = parseResults["whitelist", String.self]
-percentage = parseResults.last(as: Int.self)
-amount = parseResults.last(as: Int.self) ?? parseResults["amount", Int.self]
-priority = Int32(parseResults["priority", Int.self] ?? parseResults.first(as: Int.self) ?? Int(priority))
-percentages = parseResults.last(as: [Int].self)
-cfgWhitelist = parseResults["cfg-whitelist", String.self]
-cfgFunder = parseResults["cfg-funder", String.self]
-
-if let d = try? Data(contentsOf: URL(fileURLWithPath: path)) {
+if let d = try? Data(contentsOf: URL(fileURLWithPath: cnf.path)) {
     do {
         let config = try JSONDecoder().decode(Configuration.self, from: d)
 
-        if let f = (cfgFunder ?? config.funder) {
+        if let f = (cnf.funderOverride ?? config.funder) {
             xlmIssuer = StellarAccount(seedStr: f)
         }
 
@@ -184,7 +175,7 @@ if let d = try? Data(contentsOf: URL(fileURLWithPath: path)) {
             issuerSeed = a.issuerSeed
         }
 
-        if let w = (cfgWhitelist ?? config.whitelist) {
+        if let w = (cnf.whitelistOverride ?? config.whitelist) {
             whitelist = StellarAccount(seedStr: w)
         }
     }
@@ -207,7 +198,7 @@ if command != .dump && command != .seed {
 
 switch command {
 case .keypairs:
-    let count = amount ?? 1
+    let count = cnf.amount ?? 1
     var pairs = [GeneratedPair]()
 
     print("Generating \(count) keys.")
@@ -220,14 +211,14 @@ case .keypairs:
         }
     }
 
-    print("Writing to: \(file)")
+    print("Writing to: \(cnf.file!)")
     try JSONEncoder().encode(GeneratedPairWrapper(keypairs: pairs))
-        .write(to: URL(fileURLWithPath: file), options: [.atomic])
+        .write(to: URL(fileURLWithPath: cnf.file), options: [.atomic])
 
 case .create:
-    let pkeys = keyName.isEmpty
-        ? try read(input: file).map({ $0.address })
-        : [keyName]
+    let pkeys = cnf.keyName.isEmpty
+        ? try read(input: cnf.file).map({ $0.address })
+        : [cnf.keyName]
 
     for i in stride(from: 0, to: pkeys.count, by: 100) {
         var waiting = true
@@ -256,10 +247,10 @@ case .create:
 case .fund:
     let fundingAsset = asset ?? .ASSET_TYPE_NATIVE
 
-    let amt = amount ?? 10000
-    let pkeys = keyName.isEmpty
-        ? try read(input: file).map({ $0.address })
-        : [keyName]
+    let amt = cnf.amount ?? 10000
+    let pkeys = cnf.keyName.isEmpty
+        ? try read(input: cnf.file).map({ $0.address })
+        : [cnf.keyName]
 
     var waiting = true
 
@@ -330,27 +321,27 @@ case .whitelist:
         exit(0)
 
     case "add":
-        let account = StellarAccount(publicKey: param)
+        let account = StellarAccount(publicKey: cnf.keyName)
         key = account.publicKey
         val = Data(account.stellarKey.key.suffix(4))
     case "remove":
-        let account = StellarAccount(publicKey: param)
+        let account = StellarAccount(publicKey: cnf.keyName)
         key = account.publicKey
         val = nil
     case "reserve":
-        let reserve = Int32(percentage!)
+        let reserve = Int32(cnf.percentage)
         key = "reserve"
         val = withUnsafeBytes(of: reserve.bigEndian) { Data($0) }
     case "priority":
         guard
-            let percentages = percentages,
-            percentages.count == priority
+            let percentages = cnf.percentages,
+            percentages.count == cnf.priority
         else {
             print("Mismatch between priority level and number of percentages.")
             exit(1)
         }
 
-        key = String(format: "priority_count_%02d", priority)
+        key = String(format: "priority_count_%02d", cnf.priority)
         val = Data(bytes: percentages.map({ UInt8(clamping: $0) }))
     default: key = ""; val = nil
     }
@@ -364,19 +355,19 @@ case .whitelist:
     while waiting {}
 
 case .data:
-    let account = StellarAccount(seedStr: skey)
+    let account = StellarAccount(seedStr: cnf.skey)
     let val = parseResults.remainder.count > 0 ? parseResults.remainder[0].data(using: .utf8) : nil
 
     if let val = val {
-        print("Setting data [\(val.hexString)] for [\(keyName)] on account \(account.publicKey)")
+        print("Setting data [\(val.hexString)] for [\(cnf.keyName)] on account \(account.publicKey)")
     }
     else {
-        print("Clearing [\(keyName)] on account \(account.publicKey)")
+        print("Clearing [\(cnf.keyName)] on account \(account.publicKey)")
     }
 
     var waiting = true
 
-    data(account: account, key: keyName, val: val)
+    data(account: account, key: cnf.keyName, val: val)
         .error { print($0); exit(1) }
         .finally { waiting = false }
 
@@ -385,9 +376,9 @@ case .data:
 case .pay:
     let fundingAsset = asset ?? .ASSET_TYPE_NATIVE
 
-    let source = StellarAccount(seedStr: skey)
-    let destination = parseResults.parameterValues[1] as! String
-    let amount = parseResults.parameterValues.last as? Int ?? 1000
+    let source = StellarAccount(seedStr: cnf.skey)
+    let destination = cnf.keyName
+    let amount = cnf.amount ?? 1000
 
     var waiting = true
 
@@ -399,15 +390,15 @@ case .pay:
 
 case .dump:
     do {
-        let data = try Data(contentsOf: URL(fileURLWithPath: file))
-        let uncompressed = file.hasSuffix(".gz")
+        let data = try Data(contentsOf: URL(fileURLWithPath: cnf.file))
+        let uncompressed = cnf.file.hasSuffix(".gz")
             ? try data.gunzipped()
             : data
 
         let jsonEnc = JSONEncoder()
         jsonEnc.outputFormatting = .prettyPrinted
 
-        let filename = file.split(separator: "/").last!
+        let filename = cnf.file.split(separator: "/").last!
         if filename.starts(with: "ledger-") {
             let results: [LedgerHeaderHistoryEntry] = try parse(data: uncompressed)
 
@@ -440,10 +431,7 @@ case .dump:
         print(error)
     }
 
-case .flood:
-    flood(amount ?? 100)
-
 case .seed:
-    let sha = param.data(using: .utf8)!.sha256
+    let sha = cnf.passphrase.data(using: .utf8)!.sha256
     print("Seed: \(StellarKey(sha, type: .ed25519SecretSeed))")
 }
