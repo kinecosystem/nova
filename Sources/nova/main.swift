@@ -44,6 +44,7 @@ class Config {
     var percentage: Int!
     var priority = Int32.max
     var keyName = ""
+    var value: Data?
 }
 
 let cnf = Config()
@@ -101,6 +102,10 @@ root
     .command("data", description: "manage data on an account") {
         $0.parameter("secret key", description: "secret key of account to manage", binding: \Config.skey)
         $0.parameter("key name", description: "key of data item", binding: \Config.keyName)
+        $0.optional("value",
+                    type: .custom({ $0.data(using: .utf8) }),
+                    description: "the value to set; blank to delete <key name>",
+                    binding: \Config.value)
     }
     .command("pay", description: "send payment to the specified account") {
         $0
@@ -143,11 +148,11 @@ catch let error as CmdOptParseErrors {
         print(usage(path))
 
     case .invalidValueType(let (param, str, type, path)):
-        print("Invalid value \"\(str)\" for: \((type == .fixed ? "" : "-") + param.token)")
+        print("Invalid value \"\(str)\" for: \((type != .tagged ? "" : "-") + param.token)")
         print(usage(path))
 
     case .invalidValue(let (param, str, type, path)):
-        print("Invalid value \"\(str)\" for: \((type == .fixed ? "" : "-") + param.token)")
+        print("Invalid value \"\(str)\" for: \((type != .tagged ? "" : "-") + param.token)")
         print(usage(path))
 
     case .missingSubcommand(let path):
@@ -356,7 +361,7 @@ case .whitelist:
 
 case .data:
     let account = StellarAccount(seedStr: cnf.skey)
-    let val = parseResults.remainder.count > 0 ? parseResults.remainder[0].data(using: .utf8) : nil
+    let val = cnf.value
 
     if let val = val {
         print("Setting data [\(val.hexString)] for [\(cnf.keyName)] on account \(account.publicKey)")

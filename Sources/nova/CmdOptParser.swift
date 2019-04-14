@@ -112,6 +112,33 @@ extension NodeParent {
     }
 
     @discardableResult
+    func optional(_ parameter: String,
+                  type: Type = .string,
+                  description: String = "") -> Self {
+        children.append(ParameterNode(parameter: Parameter(parameter, type: type, description: description, binding: nil),
+                                      type: .optional))
+
+        return self
+    }
+
+    @discardableResult
+    func optional<R, V>(_ parameter: String,
+                        type: Type = .string,
+                        description: String = "",
+                        binding: ReferenceWritableKeyPath<R, V>? = nil) -> Self {
+        let b: ((Any) -> ())?
+        if let binding = binding, let target = bindTarget as? R {
+            b = { target[keyPath: binding] = $0 as! V }
+        }
+        else { b = nil }
+
+        children.append(ParameterNode(parameter: Parameter(parameter, type: type, description: description, binding: b),
+                                      type: .optional))
+
+        return self
+    }
+
+    @discardableResult
     func option(_ option: String,
                 type: Type = .string,
                 description: String = "") -> Self {
@@ -142,6 +169,10 @@ extension NodeParent {
 extension NodeParent {
     var parameters: [Node] {
         return children.filter { ($0 as? ParameterNode)?.type == .fixed }
+    }
+
+    var optionals: [Node] {
+        return children.filter { ($0 as? ParameterNode)?.type == .optional }
     }
 
     var options: [Node] {
@@ -179,6 +210,16 @@ final class ParameterNode: Node {
     init(parameter: Parameter, type: ParameterType) {
         self.parameter = parameter
         self.type = type
+    }
+}
+
+extension ParameterNode {
+    var usageToken: String {
+        switch type {
+        case .fixed: return "<" + token + ">"
+        case .optional: return "[" + token + "]"
+        case .tagged: return "-" + token
+        }
     }
 }
 
@@ -342,6 +383,7 @@ public func parse(_ arguments: [String], node: Root) throws -> ParseResults {
 
     func _parse(node: NodeParent) throws {
         let parameters = node.parameters
+        let optionals = node.optionals
         let options = node.options
         let commands = node.commands
 
@@ -399,20 +441,28 @@ public func parse(_ arguments: [String], node: Root) throws -> ParseResults {
             }
         }
 
-        for node in parameters {
-            if let param = (node as? ParameterNode)?.parameter {
+        for node in parameters + optionals {
+            if let node = node as? ParameterNode {
+                let param = node.parameter
+
                 if case .toggle = param.type {
-                    throw E.invalidParameterType(param, .fixed, commandPath)
+                    throw E.invalidParameterType(param, node.type, commandPath)
                 }
                 else {
-                    guard !arguments.isEmpty else { throw E.missingValue(param, .fixed, commandPath) }
+                    if arguments.isEmpty {
+                        if node.type == .optional {
+                            break
+                        }
+
+                        throw E.missingValue(param, node.type, commandPath)
+                    }
 
                     if case .array = param.type {
                         let args = arguments.remove(at: 0).split(separator: ",")
 
                         var values = [Any]()
                         for arg in args {
-                            if let v = try value(arg: String(arg), for: param, parameterType: .fixed) {
+                            if let v = try value(arg: String(arg), for: param, parameterType: node.type) {
                                 values.append(v)
                             }
                         }
@@ -421,7 +471,7 @@ public func parse(_ arguments: [String], node: Root) throws -> ParseResults {
                         if let binding = param.binding { binding(values) }
                     }
                     else {
-                        if let v = try value(arg: arguments.remove(at: 0), for: param, parameterType: .fixed) {
+                        if let v = try value(arg: arguments.remove(at: 0), for: param, parameterType: node.type) {
                             parameterValues.append(v)
 
                             if let binding = param.binding { binding(v) }
@@ -465,7 +515,7 @@ public func usage(_ path: [NodeParent]) -> String {
 
     let options = node.options
     let commands = node.commands
-    let parameters = node.parameters
+    let parameters = node.parameters + node.optionals
 
     if !options.isEmpty {
         usage += " [options]"
@@ -476,7 +526,7 @@ public func usage(_ path: [NodeParent]) -> String {
 
         options.forEach {
             if let val = $0 as? ParameterNode {
-                optionlist += "\n  -\(val.token)" +
+                optionlist += "\n  \(val.usageToken)" +
                     String(repeating: " ", count: width - $0.token.count) + " : \(val.parameter.description)"
             }
         }
@@ -498,7 +548,7 @@ public func usage(_ path: [NodeParent]) -> String {
     }
 
     if !parameters.isEmpty {
-        usage += " " + parameters.map({ "<\($0.token)>" }).joined(separator: " ")
+        usage += " " + parameters.map({ ($0 as! ParameterNode).usageToken }).joined(separator: " ")
     }
 
     return usage + optionlist + commandlist
