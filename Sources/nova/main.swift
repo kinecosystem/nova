@@ -325,12 +325,12 @@ case .whitelist:
         exit(0)
 
     case "add":
-        let account = StellarAccount(publicKey: cnf.keyName)
-        key = account.publicKey
-        val = Data(account.stellarKey.key.suffix(4))
+        let stellarKey = StellarKey(cnf.keyName)!
+        key = String(stellarKey)
+        val = Data(stellarKey.key.suffix(4))
     case "remove":
-        let account = StellarAccount(publicKey: cnf.keyName)
-        key = account.publicKey
+        let stellarKey = StellarKey(cnf.keyName)!
+        key = String(stellarKey)
         val = nil
     case "reserve":
         let reserve = Int32(cnf.percentage)
