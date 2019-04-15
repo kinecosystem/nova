@@ -50,30 +50,29 @@ class Config {
 let cnf = Config()
 
 let root = Root(CommandLine.arguments[0], description: "perform operations on a Horizon node", bindTarget: cnf)
-    .option("config", description: "specify a configuration file [default: \(path)]", binding: \Config.path)
+    .option("config", binding: \Config.path, description: "specify a configuration file [default: \(path)]")
     .option("cfg-funder",
-            description: "override the funder secret key from the configuration file",
-            binding: \Config.funderOverride)
+            binding: \Config.funderOverride,
+            description: "override the funder secret key from the configuration file")
     .option("cfg-whitelist",
-            description: "override the whitelist secret key from the configuration file",
-            binding: \Config.whitelistOverride)
+            binding: \Config.whitelistOverride,
+            description: "override the whitelist secret key from the configuration file")
 
-root
     .command("keypairs", description: "create keypairs for use by other commands") {
         $0
-            .option("output", description: "specify an output file [default \(file)]", binding: \Config.file)
+            .option("output", binding: \Config.file, description: "specify an output file [default \(file)]")
             .parameter("amount", type: .int(nil), binding: \Config.amount)
     }
     .command("create", description: "create accounts") {
         $0
-            .option("input", description: "specify an input file [default \(file)]", binding: \Config.file)
-            .option("key", description: "public key of the account to fund", binding: \Config.keyName)
+            .option("input", binding: \Config.file, description: "specify an input file [default \(file)]")
+            .option("key", binding: \Config.keyName, description: "public key of the account to fund")
     }
     .command("fund", description: "fund accounts, using the configured asset, if any") {
         $0
-            .option("input", description: "specify an input file [default \(file)]", binding: \Config.file)
-            .option("whitelist", description: "key with which to whitelist the tx", binding: \Config.whitelister)
-            .option("key", description: "public key of the account to fund", binding: \Config.keyName)
+            .option("input", binding: \Config.file, description: "specify an input file [default \(file)]")
+            .option("whitelist", binding: \Config.whitelister, description: "key with which to whitelist the tx")
+            .option("key", binding: \Config.keyName, description: "public key of the account to fund")
             .parameter("amount", type: .int(nil), binding: \Config.amount)
     }
     .command("whitelist", description: "manage the whitelist") {
@@ -81,7 +80,7 @@ root
 
         $0.command("add", description: "add a key") {
             $0
-                .option("priority", type: .int(1...Int(Int32.max)), description: "", binding: \Config.priority)
+                .option("priority", type: .int(1...Int(Int32.max)), binding: \Config.priority)
                 .parameter("key", binding: \Config.keyName)
         }
 
@@ -100,22 +99,22 @@ root
         }
     }
     .command("data", description: "manage data on an account") {
-        $0.parameter("secret key", description: "secret key of account to manage", binding: \Config.skey)
-        $0.parameter("key name", description: "key of data item", binding: \Config.keyName)
+        $0.parameter("secret key", binding: \Config.skey, description: "secret key of account to manage")
+        $0.parameter("key name", binding: \Config.keyName, description: "key of data item")
         $0.optional("value",
                     type: .custom({ $0.data(using: .utf8) }),
-                    description: "the value to set; blank to delete <key name>",
-                    binding: \Config.value)
+                    binding: \Config.value,
+                    description: "the value to set; blank to delete <key name>")
     }
     .command("pay", description: "send payment to the specified account") {
         $0
-            .option("whitelist", description: "key with which to whitelist the tx", binding: \Config.whitelister)
-            .parameter("secret key", description: "secret key of source account", binding: \Config.skey)
-            .parameter("destination key", description: "public key of destination account", binding: \Config.keyName)
+            .option("whitelist", binding: \Config.whitelister, description: "key with which to whitelist the tx")
+            .parameter("secret key", binding: \Config.skey, description: "secret key of source account")
+            .parameter("destination key", binding: \Config.keyName, description: "public key of destination account")
             .parameter("amount", type: .int(nil), binding: \Config.amount)
     }
     .command("dump", description: "dump an xdr file from a history archive as JSON") {
-        $0.parameter("file", description: "the file to dump.  May be gzipped", binding: \Config.file)
+        $0.parameter("file", binding: \Config.file, description: "the file to dump.  May be gzipped")
     }
     .command("seed", description: "generate network seed from passphrase") {
         $0.parameter("passphrase", binding: \Config.passphrase)
@@ -123,7 +122,7 @@ root
 
 let parseResults: ParseResults
 do {
-    parseResults = try parse(Array(CommandLine.arguments.dropFirst()), node: root)
+    parseResults = try parse(CommandLine.arguments.dropFirst(), node: root)
 }
 catch let error as CmdOptParseErrors {
     switch error {
@@ -134,7 +133,7 @@ catch let error as CmdOptParseErrors {
     case .ambiguousOption(let (str, possibilities, path)):
         print("Ambiguous option: \(str)")
         print("Possible matches: " + possibilities.compactMap {
-            if let opt = ($0 as? ParameterNode)?.parameter {
+            if let opt = $0 as? Parameter {
                 return "-" + opt.token
             }
 
@@ -143,16 +142,16 @@ catch let error as CmdOptParseErrors {
 
         print(usage(path))
 
-    case .missingValue(let (param, type, path)):
-        print("Missing value for: \((type == .fixed ? "" : "-") + param.token)")
+    case .missingValue(let (param, path)):
+        print("Missing value for: \((param.parameterType == .fixed ? "" : "-") + param.token)")
         print(usage(path))
 
-    case .invalidValueType(let (param, str, type, path)):
-        print("Invalid value \"\(str)\" for: \((type != .tagged ? "" : "-") + param.token)")
+    case .invalidValueType(let (param, str, path)):
+        print("Invalid value \"\(str)\" for: \((param.parameterType != .tagged ? "" : "-") + param.token)")
         print(usage(path))
 
-    case .invalidValue(let (param, str, type, path)):
-        print("Invalid value \"\(str)\" for: \((type != .tagged ? "" : "-") + param.token)")
+    case .invalidValue(let (param, str, path)):
+        print("Invalid value \"\(str)\" for: \((param.parameterType != .tagged ? "" : "-") + param.token)")
         print(usage(path))
 
     case .missingSubcommand(let path):
