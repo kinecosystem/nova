@@ -8,13 +8,13 @@
 import Foundation
 
 public enum CmdOptParseErrors: Error {
-    case unknownOption(String, [ParentNode])
-    case ambiguousOption(String, [Node], [ParentNode])
-    case missingValue(Parameter, [ParentNode])
-    case invalidValue(Parameter, String, [ParentNode])
-    case invalidValueType(Parameter, String, [ParentNode])
-    case missingSubcommand([ParentNode])
-    case invalidParameterType(Parameter, [ParentNode])
+    case unknownOption(String, [_ParentNode])
+    case ambiguousOption(String, [_Node], [_ParentNode])
+    case missingValue(_Parameter, [_ParentNode])
+    case invalidValue(_Parameter, String, [_ParentNode])
+    case invalidValueType(_Parameter, String, [_ParentNode])
+    case missingSubcommand([_ParentNode])
+    case invalidParameterType(_Parameter, [_ParentNode])
 }
 private typealias E = CmdOptParseErrors
 
@@ -29,7 +29,7 @@ public indirect enum ValueType {
     case custom((String) -> Any?)
 }
 
-extension ValueType {
+private extension ValueType {
     var isToggle: Bool {
         switch self {
         case .toggle: return true
@@ -38,28 +38,33 @@ extension ValueType {
     }
 }
 
-public enum ParameterType {
-    case fixed
-    case optional
-    case tagged
+public class _Node {
+    public let token: String
+    fileprivate let description: String
+
+    fileprivate init(token: String, description: String) {
+        self.token = token
+        self.description = description
+    }
 }
 
-public protocol Node: AnyObject {
-    var token: String { get }
-    var description: String { get }
+public class _ParentNode: _Node {
+    fileprivate let bindTarget: AnyObject?
+    fileprivate var children = [_Node]()
+
+    fileprivate init(token: String, description: String, bindTarget: AnyObject?) {
+        self.bindTarget = bindTarget
+
+        super.init(token: token, description: description)
+    }
 }
 
-public protocol ParentNode: Node {
-    var bindTarget: AnyObject? { get }
-    var children: [Node] { get set }
-}
-
-public extension ParentNode {
+public extension _ParentNode {
     @discardableResult
     func command(_ command: String,
                  bindTarget: AnyObject? = nil,
                  description: String = "",
-                 configure: (ParentNode) -> () = { _ in }) -> Self {
+                 configure: (_ParentNode) -> () = { _ in }) -> Self {
         let node = Command(command,
                                description: description,
                                bindTarget: bindTarget ?? self.bindTarget)
@@ -74,11 +79,10 @@ public extension ParentNode {
     func parameter(_ parameter: String,
                    type: ValueType = .string,
                    description: String = "") -> Self {
-        children.append(Parameter(parameter,
-                                      type: type,
-                                      binding: nil,
-                                      description: description,
-                                      parameterType: .fixed))
+        children.append(Argument(parameter,
+                                 type: type,
+                                 binding: nil,
+                                 description: description))
 
         return self
     }
@@ -94,11 +98,10 @@ public extension ParentNode {
         }
         else { b = nil }
 
-        children.append(Parameter(parameter,
-                                      type: type,
-                                      binding: b,
-                                      description: description,
-                                      parameterType: .fixed))
+        children.append(Argument(parameter,
+                                 type: type,
+                                 binding: b,
+                                 description: description))
 
         return self
     }
@@ -107,11 +110,10 @@ public extension ParentNode {
     func optional(_ parameter: String,
                   type: ValueType = .string,
                   description: String = "") -> Self {
-        children.append(Parameter(parameter,
-                                      type: type,
-                                      binding: nil,
-                                      description: description,
-                                      parameterType: .optional))
+        children.append(Optional(parameter,
+                                 type: type,
+                                 binding: nil,
+                                 description: description))
 
         return self
     }
@@ -127,11 +129,10 @@ public extension ParentNode {
         }
         else { b = nil }
 
-        children.append(Parameter(parameter,
-                                      type: type,
-                                      binding: b,
-                                      description: description,
-                                      parameterType: .optional))
+        children.append(Optional(parameter,
+                                 type: type,
+                                 binding: b,
+                                 description: description))
 
         return self
     }
@@ -140,11 +141,10 @@ public extension ParentNode {
     func option(_ option: String,
                 type: ValueType = .string,
                 description: String = "") -> Self {
-        children.append(Parameter(option,
-                                      type: type,
-                                      binding: nil,
-                                      description: description,
-                                      parameterType: .tagged))
+        children.append(Option(option,
+                               type: type,
+                               binding: nil,
+                               description: description))
 
         return self
     }
@@ -160,98 +160,71 @@ public extension ParentNode {
         }
         else { b = nil }
 
-        children.append(Parameter(option,
-                                      type: type,
-                                      binding: b,
-                                      description: description,
-                                      parameterType: .tagged))
+        children.append(Option(option,
+                               type: type,
+                               binding: b,
+                               description: description))
 
         return self
     }
 }
 
-fileprivate extension ParentNode {
-    var parameters: [Parameter] {
+private extension _ParentNode {
+    var parameters: [_Parameter] {
         return children
-            .compactMap { $0 as? Parameter }
-            .filter { $0.parameterType == .fixed }
+            .compactMap { $0 as? Argument }
     }
 
-    var optionals: [Parameter] {
+    var optionals: [_Parameter] {
         return children
-            .compactMap { $0 as? Parameter }
-            .filter { $0.parameterType == .optional }
+            .compactMap { $0 as? Optional }
     }
 
-    var options: [Parameter] {
+    var options: [_Parameter] {
         return children
-            .compactMap { $0 as? Parameter }
-            .filter { $0.parameterType == .tagged }
+            .compactMap { $0 as? Option }
     }
 
-    var commands: [ParentNode] {
+    var commands: [_ParentNode] {
         return children
-            .compactMap { $0 as? ParentNode }
-            .filter { $0 is Command || $0 is Root }
+            .compactMap { $0 as? Command }
     }
 }
 
-public final class Root: ParentNode {
-    let appName: String
-    public let description: String
-    public let bindTarget: AnyObject?
-    public var children = [Node]()
-
-    public var token: String { return appName }
-
+public final class Command: _ParentNode {
     public init(_ appName: String, description: String = "", bindTarget: AnyObject? = nil) {
-        self.appName = appName
-        self.description = description
-        self.bindTarget = bindTarget
+        super.init(token: appName, description: description, bindTarget: bindTarget)
     }
 }
 
-public final class Parameter: Node {
-    public let token: String
-    public let type: ValueType
-    public let parameterType: ParameterType
-    public let description: String
-    let binding: ((Any) -> ())?
+public class _Parameter: _Node {
+    fileprivate let type: ValueType
+    fileprivate let binding: ((Any) -> ())?
 
-    fileprivate init(_ token: String, type: ValueType, binding: ((Any) -> ())? = nil, description: String = "", parameterType: ParameterType) {
-        self.token = token
+    fileprivate var usageToken: String { return "" }
+
+    fileprivate init(_ token: String, type: ValueType, binding: ((Any) -> ())? = nil, description: String = "") {
         self.type = type
         self.binding = binding
-        self.parameterType = parameterType
-        self.description = description
+
+        super.init(token: token, description: description)
     }
 }
 
-extension Parameter {
-    var usageToken: String {
-        switch parameterType {
-        case .fixed: return "<" + token + ">"
-        case .optional: return "[" + token + "]"
-        case .tagged: return "-" + token
-        }
-    }
+public final class Argument: _Parameter {
+    override fileprivate var usageToken: String { return "<\(token)>" }
 }
 
-public final class Command: ParentNode {
-    public let token: String
-    public let bindTarget: AnyObject?
-    public let description: String
-    public var children = [Node]()
+public final class Option: _Parameter {
+    override fileprivate var usageToken: String { return "-\(token)" }
+}
 
-    fileprivate init(_ token: String, description: String = "", bindTarget: AnyObject?) {
-        self.token = token
-        self.description = description
-        self.bindTarget = bindTarget
-    }
+public final class Optional: _Parameter {
+    override fileprivate var usageToken: String { return "[\(token)]" }
 }
 
 public struct ParseResults {
-    public let commandPath: [Node]
+    public let commandPath: [_Node]
     public let parameterValues: [Any]
     public let optionValues: [String: Any]
     public let remainder: [String]
@@ -298,17 +271,17 @@ private func prepare(_ args: [String]) -> ([String], [String]) {
 }
 
 @discardableResult
-public func parse<S: Sequence>(_ arguments: S, node: Root) throws -> ParseResults
+public func parse<S: Sequence>(_ arguments: S, node: Command) throws -> ParseResults
     where S.Element == String
 {
-    var commandPath: [ParentNode] = [node]
+    var commandPath: [_ParentNode] = [node]
     var parameterValues = [Any]()
     var optionValues = [String: Any]()
 
     var (arguments, remainder) = prepare(Array(arguments))
 
-    func value(arg: String, for opt: Parameter) throws -> Any? {
-        func checkedValue(_ arg: String, for opt: Parameter, as type: ValueType) throws -> Any {
+    func value(arg: String, for opt: _Parameter) throws -> Any? {
+        func checkedValue(_ arg: String, for opt: _Parameter, as type: ValueType) throws -> Any {
             let invalidValue = E.invalidValue(opt, arg, commandPath)
             let invalidValueType = E.invalidValue(opt, arg, commandPath)
 
@@ -363,10 +336,10 @@ public func parse<S: Sequence>(_ arguments: S, node: Root) throws -> ParseResult
         }
     }
 
-    func optionMatch(_ arg: String, options: [Parameter]) throws -> Parameter? {
+    func optionMatch(_ arg: String, options: [_Parameter]) throws -> _Parameter? {
         guard arg.starts(with: "-") else { return nil }
 
-        var matches = [Parameter]()
+        var matches = [_Parameter]()
 
         let arg = arg.dropFirst()
 
@@ -395,7 +368,7 @@ public func parse<S: Sequence>(_ arguments: S, node: Root) throws -> ParseResult
         return matches.first
     }
 
-    func _parse(node: ParentNode) throws {
+    func _parse(node: _ParentNode) throws {
         let parameters = node.parameters
         let optionals = node.optionals
         let options = node.options
@@ -450,7 +423,7 @@ public func parse<S: Sequence>(_ arguments: S, node: Root) throws -> ParseResult
             }
 
             if arguments.isEmpty {
-                guard node.parameterType == .optional else {
+                guard node is Optional else {
                     throw E.missingValue(node, commandPath)
                 }
 
@@ -501,17 +474,12 @@ private extension Array where Element == String {
     mutating func pop() -> Element { return popLast()! }
 }
 
-public func usage(_ node: ParentNode) -> String {
+public func usage(_ node: _ParentNode) -> String {
     return usage([node])
 }
 
-public func usage(_ path: [ParentNode]) -> String {
-    let root = path[0]
+public func usage(_ path: [_ParentNode]) -> String {
     let node = path[path.index(before: path.endIndex)]
-
-    guard root is Root else {
-        return ""
-    }
 
     let pathUsage = path.map { $0.token }.joined(separator: " ")
 

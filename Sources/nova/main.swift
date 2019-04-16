@@ -32,8 +32,8 @@ let path = "./config.json"
 let file = "keypairs.json"
 
 class Config {
-    var path: String!
-    var file: String!
+    var path = "./config.json"
+    var file = "keypairs.json"
     var passphrase: String!
     var whitelistOverride: String?
     var funderOverride: String?
@@ -49,8 +49,8 @@ class Config {
 
 let cnf = Config()
 
-let root = Root(CommandLine.arguments[0], description: "perform operations on a Horizon node", bindTarget: cnf)
-    .option("config", binding: \Config.path, description: "specify a configuration file [default: \(path)]")
+let root = Command(CommandLine.arguments[0], description: "perform operations on a Horizon node", bindTarget: cnf)
+    .option("config", binding: \Config.path, description: "specify a configuration file [default: \(cnf.path)]")
     .option("cfg-funder",
             binding: \Config.funderOverride,
             description: "override the funder secret key from the configuration file")
@@ -60,17 +60,17 @@ let root = Root(CommandLine.arguments[0], description: "perform operations on a 
 
     .command("keypairs", description: "create keypairs for use by other commands") {
         $0
-            .option("output", binding: \Config.file, description: "specify an output file [default \(file)]")
+            .option("output", binding: \Config.file, description: "specify an output file [default \(cnf.file)]")
             .parameter("amount", type: .int(nil), binding: \Config.amount)
     }
     .command("create", description: "create accounts") {
         $0
-            .option("input", binding: \Config.file, description: "specify an input file [default \(file)]")
+            .option("input", binding: \Config.file, description: "specify an input file [default \(cnf.file)]")
             .option("key", binding: \Config.keyName, description: "public key of the account to fund")
     }
     .command("fund", description: "fund accounts, using the configured asset, if any") {
         $0
-            .option("input", binding: \Config.file, description: "specify an input file [default \(file)]")
+            .option("input", binding: \Config.file, description: "specify an input file [default \(cnf.file)]")
             .option("whitelist", binding: \Config.whitelister, description: "key with which to whitelist the tx")
             .option("key", binding: \Config.keyName, description: "public key of the account to fund")
             .parameter("amount", type: .int(nil), binding: \Config.amount)
@@ -133,7 +133,7 @@ catch let error as CmdOptParseErrors {
     case .ambiguousOption(let (str, possibilities, path)):
         print("Ambiguous option: \(str)")
         print("Possible matches: " + possibilities.compactMap {
-            if let opt = $0 as? Parameter {
+            if let opt = $0 as? _Parameter {
                 return "-" + opt.token
             }
 
@@ -143,15 +143,15 @@ catch let error as CmdOptParseErrors {
         print(usage(path))
 
     case .missingValue(let (param, path)):
-        print("Missing value for: \((param.parameterType == .fixed ? "" : "-") + param.token)")
+        print("Missing value for: \((param is Option ? "-" : "") + param.token)")
         print(usage(path))
 
     case .invalidValueType(let (param, str, path)):
-        print("Invalid value \"\(str)\" for: \((param.parameterType != .tagged ? "" : "-") + param.token)")
+        print("Invalid value \"\(str)\" for: \((param is Option ? "-" : "") + param.token)")
         print(usage(path))
 
     case .invalidValue(let (param, str, path)):
-        print("Invalid value \"\(str)\" for: \((param.parameterType != .tagged ? "" : "-") + param.token)")
+        print("Invalid value \"\(str)\" for: \((param is Option ? "-" : "") + param.token)")
         print(usage(path))
 
     case .missingSubcommand(let path):
@@ -215,7 +215,7 @@ case .keypairs:
         }
     }
 
-    print("Writing to: \(cnf.file!)")
+    print("Writing to: \(cnf.file)")
     try JSONEncoder().encode(GeneratedPairWrapper(keypairs: pairs))
         .write(to: URL(fileURLWithPath: cnf.file), options: [.atomic])
 
