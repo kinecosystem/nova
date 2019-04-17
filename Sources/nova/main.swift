@@ -28,6 +28,14 @@ enum Commands: String {
     case seed
 }
 
+enum WhitelistCommands: String {
+    case list
+    case add
+    case remove
+    case priority
+    case reserve
+}
+
 let path = "./config.json"
 let file = "keypairs.json"
 
@@ -49,7 +57,7 @@ class Config {
 
 let cnf = Config()
 
-let root = Command(CommandLine.arguments[0], description: "perform operations on a Horizon node", bindTarget: cnf)
+let root = Command(description: "perform operations on a Horizon node", bindTarget: cnf)
     .option("config", binding: \Config.path, description: "specify a configuration file [default: \(cnf.path)]")
     .option("cfg-funder",
             binding: \Config.funderOverride,
@@ -58,47 +66,47 @@ let root = Command(CommandLine.arguments[0], description: "perform operations on
             binding: \Config.whitelistOverride,
             description: "override the whitelist secret key from the configuration file")
 
-    .command("keypairs", description: "create keypairs for use by other commands") {
+    .command(Commands.keypairs, description: "create keypairs for use by other commands") {
         $0
             .option("output", binding: \Config.file, description: "specify an output file [default \(cnf.file)]")
             .parameter("amount", type: .int(nil), binding: \Config.amount)
     }
-    .command("create", description: "create accounts") {
+    .command(Commands.create, description: "create accounts") {
         $0
             .option("input", binding: \Config.file, description: "specify an input file [default \(cnf.file)]")
             .option("key", binding: \Config.keyName, description: "public key of the account to fund")
     }
-    .command("fund", description: "fund accounts, using the configured asset, if any") {
+    .command(Commands.fund, description: "fund accounts, using the configured asset, if any") {
         $0
             .option("input", binding: \Config.file, description: "specify an input file [default \(cnf.file)]")
             .option("whitelist", binding: \Config.whitelister, description: "key with which to whitelist the tx")
             .option("key", binding: \Config.keyName, description: "public key of the account to fund")
             .parameter("amount", type: .int(nil), binding: \Config.amount)
     }
-    .command("whitelist", description: "manage the whitelist") {
-        $0.command("list", description: "list the whitelist contents and configuration")
+    .command(Commands.whitelist, description: "manage the whitelist") {
+        $0.command(WhitelistCommands.list, description: "list the whitelist contents and configuration")
 
-        $0.command("add", description: "add a key") {
+        $0.command(WhitelistCommands.add, description: "add a key") {
             $0
                 .option("priority", type: .int(1...Int(Int32.max)), binding: \Config.priority)
                 .parameter("key", binding: \Config.keyName)
         }
 
-        $0.command("remove", description: "remove a key") {
+        $0.command(WhitelistCommands.remove, description: "remove a key") {
             $0.parameter("key", binding: \Config.keyName)
         }
 
-        $0.command("reserve", description: "set the %capacity to reserve for non-whitelisted accounts") {
+        $0.command(WhitelistCommands.reserve, description: "set the %capacity to reserve for non-whitelisted accounts") {
             $0.parameter("percentage", type: .int(1...100), binding: \Config.percentage)
         }
 
-        $0.command("priority", description: "set the percentages to allocate across priorities") {
+        $0.command(WhitelistCommands.priority, description: "set the percentages to allocate across priorities") {
             $0
                 .parameter("level", type: .int(1...20), binding: \Config.priority)
                 .parameter("percentages", type: .array(.int(1...100)), binding: \Config.percentages)
         }
     }
-    .command("data", description: "manage data on an account") {
+    .command(Commands.data, description: "manage data on an account") {
         $0.parameter("secret key", binding: \Config.skey, description: "secret key of account to manage")
         $0.parameter("key name", binding: \Config.keyName, description: "key of data item")
         $0.optional("value",
@@ -106,17 +114,17 @@ let root = Command(CommandLine.arguments[0], description: "perform operations on
                     binding: \Config.value,
                     description: "the value to set; blank to delete <key name>")
     }
-    .command("pay", description: "send payment to the specified account") {
+    .command(Commands.pay, description: "send payment to the specified account") {
         $0
             .option("whitelist", binding: \Config.whitelister, description: "key with which to whitelist the tx")
             .parameter("secret key", binding: \Config.skey, description: "secret key of source account")
             .parameter("destination key", binding: \Config.keyName, description: "public key of destination account")
             .parameter("amount", type: .int(nil), binding: \Config.amount)
     }
-    .command("dump", description: "dump an xdr file from a history archive as JSON") {
+    .command(Commands.dump, description: "dump an xdr file from a history archive as JSON") {
         $0.parameter("file", binding: \Config.file, description: "the file to dump.  May be gzipped")
     }
-    .command("seed", description: "generate network seed from passphrase") {
+    .command(Commands.seed, description: "generate network seed from passphrase") {
         $0.parameter("passphrase", binding: \Config.passphrase)
 }
 
@@ -132,13 +140,8 @@ catch let error as CmdOptParseErrors {
 
     case .ambiguousOption(let (str, possibilities, path)):
         print("Ambiguous option: \(str)")
-        print("Possible matches: " + possibilities.compactMap {
-            if let opt = $0 as? _Parameter {
-                return "-" + opt.token
-            }
-
-            return nil
-            }.joined(separator: ", "))
+        print("Possible matches: " + possibilities.map { "-" + $0.token}
+            .joined(separator: ", "))
 
         print(usage(path))
 
@@ -194,7 +197,7 @@ func read(_ byteCount: Int, from data: Data, into: UnsafeMutableRawPointer) {
     })
 }
 
-let command = Commands(rawValue: parseResults.commandPath[1].token)!
+let command = parseResults.commands[0] as! Commands
 
 if command != .dump && command != .seed {
     printConfig()
@@ -277,8 +280,8 @@ case .whitelist:
     let key: String
     let val: Data?
 
-    switch parseResults.commandPath[2].token {
-    case "list":
+    switch parseResults.commands[1] as! WhitelistCommands {
+    case .list:
         var waiting = true
 
         whitelist.details(node: node)
@@ -324,19 +327,19 @@ case .whitelist:
 
         exit(0)
 
-    case "add":
+    case .add:
         let stellarKey = StellarKey(cnf.keyName)!
         key = String(stellarKey)
         val = Data(stellarKey.key.suffix(4))
-    case "remove":
+    case .remove:
         let stellarKey = StellarKey(cnf.keyName)!
         key = String(stellarKey)
         val = nil
-    case "reserve":
+    case .reserve:
         let reserve = Int32(cnf.percentage)
         key = "reserve"
         val = withUnsafeBytes(of: reserve.bigEndian) { Data($0) }
-    case "priority":
+    case .priority:
         guard
             let percentages = cnf.percentages,
             percentages.count == cnf.priority
@@ -347,7 +350,6 @@ case .whitelist:
 
         key = String(format: "priority_count_%02d", cnf.priority)
         val = Data(bytes: percentages.map({ UInt8(clamping: $0) }))
-    default: key = ""; val = nil
     }
 
     var waiting = true
