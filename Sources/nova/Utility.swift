@@ -22,7 +22,7 @@ func printConfig() {
         print("    Whitelist: \(whitelist.publicKey)")
     }
 
-    if let asset = asset {
+    if asset != .ASSET_TYPE_NATIVE {
         print("    Asset: [\(asset.assetCode), \(asset.issuer!)]")
     }
 
@@ -36,6 +36,12 @@ func read(input: String) throws -> [GeneratedPair] {
     print("Read \(pairs.count) keys.")
 
     return pairs
+}
+
+func read(_ byteCount: Int, from data: Data, into: UnsafeMutableRawPointer) {
+    data.withUnsafeBytes({ (ptr: UnsafePointer<UInt8>) -> () in
+        memcpy(into, ptr, byteCount)
+    })
 }
 
 func chunkArchiveData(_ data: Data, closure: (Data) throws -> ()) throws {
@@ -68,4 +74,26 @@ func parse<T: XDRDecodable>(data: Data) throws -> [T] {
     }
 
     return results
+}
+
+func checkNodeConfig() {
+    precondition(node != nil, "No Horizon node provided.")
+}
+
+func checkCreateConfig() {
+    precondition(xlmIssuer != nil, "No funder provided.")
+    checkNodeConfig()
+}
+
+func checkFundConfig(source: StellarAccount?, asset: Asset) {
+    checkNodeConfig()
+
+    if source == nil { return }
+
+    if asset == .ASSET_TYPE_NATIVE {
+        precondition(xlmIssuer != nil, "No funder provided.")
+    }
+    else {
+        precondition(issuerSeed != nil, "No issuer seed provided.")
+    }
 }

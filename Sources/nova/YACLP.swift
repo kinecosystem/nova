@@ -1,5 +1,5 @@
 //
-//  CmdOptParser.swift
+//  YACLP.swift
 //  nova
 //
 //  Created by Avi Shevin on 25/11/2018.
@@ -7,7 +7,7 @@
 
 import Foundation
 
-public enum CmdOptParseErrors: Error {
+public enum YACLPError: Error {
     /**
      Unrecognized tagged parameter found.
 
@@ -71,14 +71,8 @@ public enum CmdOptParseErrors: Error {
      - list of commands parsed
      */
     case missingSubcommand([Command])
-
-    /*
-     Unrecognized tagged parameter found.
-     associated values: (unrecognized string, list of commands parsed)
-     */
-    case invalidParameterType(Parameter, [Command])
 }
-private typealias E = CmdOptParseErrors
+private typealias E = YACLPError
 
 public indirect enum ValueType {
     case string
@@ -107,8 +101,10 @@ public final class Command {
 
     fileprivate let description: String
     fileprivate let bindTarget: AnyObject?
-    fileprivate var parameters = [Parameter]()
     fileprivate var subcommands = [Command]()
+    fileprivate var arguments = [Parameter]()
+    fileprivate var optionals = [Parameter]()
+    fileprivate var options = [Parameter]()
 
     fileprivate let addToPath: AddClosure?
 
@@ -166,10 +162,10 @@ public extension Command {
         }
         else { b = nil }
 
-        parameters.append(Argument(parameter,
-                                   type: type,
-                                   binding: b,
-                                   description: description))
+        arguments.append(Argument(parameter,
+                                  type: type,
+                                  binding: b,
+                                  description: description))
 
         return self
     }
@@ -185,10 +181,10 @@ public extension Command {
         }
         else { b = nil }
 
-        parameters.append(Optional(parameter,
-                                   type: type,
-                                   binding: b,
-                                   description: description))
+        optionals.append(Optional(parameter,
+                                  type: type,
+                                  binding: b,
+                                  description: description))
 
         return self
     }
@@ -204,21 +200,13 @@ public extension Command {
         }
         else { b = nil }
 
-        parameters.append(Option(parameter,
-                                 type: type,
-                                 binding: b,
-                                 description: description))
+        options.append(Option(parameter,
+                              type: type,
+                              binding: b,
+                              description: description))
 
         return self
     }
-}
-
-private extension Command {
-    var arguments: [Parameter] { return parameters.compactMap { $0 as? Argument } }
-
-    var optionals: [Parameter] { return parameters.compactMap { $0 as? Optional } }
-
-    var options: [Parameter] { return parameters.compactMap { $0 as? Option } }
 }
 
 public class Parameter {

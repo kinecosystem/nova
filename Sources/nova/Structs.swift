@@ -12,8 +12,8 @@ import Sodium
 
 struct Configuration: Decodable {
     let funder: String?
-    let horizon_url: URL
-    let network_id: String
+    let horizon_url: URL?
+    let network_id: String?
     let asset: Asset?
     let whitelist: String?
 

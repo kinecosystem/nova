@@ -14,7 +14,7 @@ import Gzip
 var node: StellarKit.Node!
 var whitelist: StellarAccount?
 var xlmIssuer: StellarAccount!
-var asset: Asset?
+var asset: Asset = .ASSET_TYPE_NATIVE
 var issuerSeed: String!
 
 enum Commands: String {
@@ -76,7 +76,7 @@ let root = Command(description: "perform operations on a Horizon node", bindTarg
             .tagged("input", binding: \Config.file, description: "specify an input file [default \(cnf.file)]")
             .tagged("key", binding: \Config.keyName, description: "public key of the account to fund")
     }
-    .command(Commands.fund, description: "fund accounts, using the configured asset, if any") {
+    .command(Commands.fund, description: "fund accounts, using the configured asset, or native") {
         $0
             .tagged("input", binding: \Config.file, description: "specify an input file [default \(cnf.file)]")
             .tagged("whitelist", binding: \Config.whitelister, description: "key with which to whitelist the tx")
@@ -132,7 +132,7 @@ let parseResults: ParseResults
 do {
     parseResults = try parse(CommandLine.arguments.dropFirst(), root: root)
 }
-catch let error as CmdOptParseErrors {
+catch let error as YACLPError {
     switch error {
     case .unknownOption(let (str, path)):
         print("Unknown option: \(str)")
@@ -159,42 +159,41 @@ catch let error as CmdOptParseErrors {
 
     case .missingSubcommand(let path):
         print(usage(path))
-
-    default:
-        break
     }
 
     exit(1)
 }
 
-if let d = try? Data(contentsOf: URL(fileURLWithPath: cnf.path)) {
-    do {
-        let config = try JSONDecoder().decode(Configuration.self, from: d)
-
-        if let f = (cnf.funderOverride ?? config.funder) {
-            xlmIssuer = StellarAccount(seedStr: f)
-        }
-
-        node = StellarKit.Node(baseURL: config.horizon_url, networkId: NetworkId(config.network_id))
-
-        if let a = config.asset {
-            asset = StellarKit.Asset(assetCode: a.code, issuer: StellarKey(a.issuer)!)
-            issuerSeed = a.issuerSeed
-        }
-
-        if let w = (cnf.whitelistOverride ?? config.whitelist) {
-            whitelist = StellarAccount(seedStr: w)
-        }
+func parseConfig() throws {
+    guard let d = try? Data(contentsOf: URL(fileURLWithPath: cnf.path)) else {
+        return
     }
-    catch {
-        print("Unable to parse configuration: \(error)")
+
+    let config = try JSONDecoder().decode(Configuration.self, from: d)
+
+    if let f = (cnf.funderOverride ?? config.funder) {
+        xlmIssuer = StellarAccount(seedStr: f)
+    }
+
+    if let h = config.horizon_url, let n = config.network_id {
+        node = StellarKit.Node(baseURL: h, networkId: NetworkId(n))
+    }
+
+    if let a = config.asset {
+        asset = StellarKit.Asset(assetCode: a.code, issuer: StellarKey(a.issuer)!)!
+        issuerSeed = a.issuerSeed
+    }
+
+    if let w = (cnf.whitelistOverride ?? config.whitelist) {
+        whitelist = StellarAccount(seedStr: w)
     }
 }
 
-func read(_ byteCount: Int, from data: Data, into: UnsafeMutableRawPointer) {
-    data.withUnsafeBytes({ (ptr: UnsafePointer<UInt8>) -> () in
-        memcpy(into, ptr, byteCount)
-    })
+do {
+    try parseConfig()
+}
+catch {
+    print("Unable to parse configuration: \(error)")
 }
 
 let command = parseResults.commands[0] as! Commands
@@ -252,8 +251,6 @@ case .create:
     }
 
 case .fund:
-    let fundingAsset = asset ?? .ASSET_TYPE_NATIVE
-
     let amt = cnf.amount ?? 10000
     let pkeys = cnf.keyName.isEmpty
         ? try read(input: cnf.file).map({ $0.address })
@@ -264,7 +261,7 @@ case .fund:
     for i in stride(from: 0, to: pkeys.count, by: 100) {
         waiting = true
 
-        fund(accounts: Array(pkeys[i ..< min(i + 100, pkeys.count)]), asset: fundingAsset, amount: amt)
+        fund(accounts: Array(pkeys[i ..< min(i + 100, pkeys.count)]), asset: asset, amount: amt)
             .error { print($0); exit(1) }
             .finally { waiting = false }
 
@@ -380,15 +377,13 @@ case .data:
     while waiting {}
 
 case .pay:
-    let fundingAsset = asset ?? .ASSET_TYPE_NATIVE
-
     let source = StellarAccount(seedStr: cnf.skey)
     let destination = cnf.keyName
     let amount = cnf.amount ?? 1000
 
     var waiting = true
 
-    fund(from: source, accounts: [destination], asset: fundingAsset, amount: amount)
+    fund(from: source, accounts: [destination], asset: asset, amount: amount)
         .error { print($0); exit(1) }
         .finally { waiting = false }
 

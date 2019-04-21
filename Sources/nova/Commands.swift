@@ -19,15 +19,19 @@ struct ErrorMessage: Error, CustomStringConvertible {
 }
 
 func create(accounts: [String]) -> Promise<String> {
+    checkCreateConfig()
+
     return TxBuilder(source: xlmIssuer, node: node)
         .add(operations: accounts.map({ StellarKit.Operation.createAccount(destination: StellarKey($0)!,
-                                                                           balance: 1000000000) }))
+                                                                           balance: 0) }))
         .signedEnvelope()
         .post(to: node)
         .then { result -> String in print("Created \(accounts.count) accounts"); return result.hash }
 }
 
 func fund(from source: StellarAccount? = nil, accounts: [String], asset: Asset, amount: Int) -> Promise<String> {
+    checkFundConfig(source: source, asset: asset)
+
     let issuer = source ??
         (asset == .ASSET_TYPE_NATIVE ? xlmIssuer! : StellarAccount(seedStr: issuerSeed))
 
@@ -53,6 +57,8 @@ func fund(from source: StellarAccount? = nil, accounts: [String], asset: Asset, 
 }
 
 func data(account: StellarAccount, key: String, val: Data?, fee: UInt32? = nil) -> Promise<String> {
+    checkNodeConfig()
+
     return TxBuilder(source: account, node: node)
         .add(operation: StellarKit.Operation.manageData(key: key, value: val))
         .set(fee: fee)
@@ -67,25 +73,4 @@ func data(account: StellarAccount, key: String, val: Data?, fee: UInt32? = nil) 
         .mapError({
             return ErrorMessage(message: "Received error while setting data: \($0)")
         })
-}
-
-func flood(_ opsPerTx: Int) {
-    let requestor = Horizon()
-    
-    while true {
-        _ =
-            TxBuilder(source: xlmIssuer, node: node)
-                .set(fee: UInt32(100 * opsPerTx))
-                .add(operations: (0 ..< opsPerTx).compactMap { _ in
-                    if let seed = KeyUtils.seed(), let keypair = KeyUtils.keyPair(from: seed) {
-                        return StellarKit.Operation
-                            .createAccount(destination: StellarKey(keypair.publicKey),
-                                           balance: 123)
-                    }
-
-                    return nil
-                })
-                .signedEnvelope()
-                .post(to: node, using: requestor)
-    }
 }
