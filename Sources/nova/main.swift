@@ -50,7 +50,7 @@ class Config {
     var whitelister: String?
     var percentages: [Int]?
     var percentage: Int!
-    var priority = Int32.max
+    var priority = Int(Int32.max)
     var keyName = ""
     var value: Data?
 }
@@ -58,57 +58,57 @@ class Config {
 let cnf = Config()
 
 let root = Command(description: "perform operations on a Horizon node", bindTarget: cnf)
-    .option("config", binding: \Config.path, description: "specify a configuration file [default: \(cnf.path)]")
-    .option("cfg-funder",
+    .tagged("config", binding: \Config.path, description: "specify a configuration file [default: \(cnf.path)]")
+    .tagged("cfg-funder",
             binding: \Config.funderOverride,
             description: "override the funder secret key from the configuration file")
-    .option("cfg-whitelist",
+    .tagged("cfg-whitelist",
             binding: \Config.whitelistOverride,
             description: "override the whitelist secret key from the configuration file")
 
     .command(Commands.keypairs, description: "create keypairs for use by other commands") {
         $0
-            .option("output", binding: \Config.file, description: "specify an output file [default \(cnf.file)]")
-            .parameter("amount", type: .int(nil), binding: \Config.amount)
+            .tagged("output", binding: \Config.file, description: "specify an output file [default \(cnf.file)]")
+            .required("amount", type: .int(nil), binding: \Config.amount)
     }
     .command(Commands.create, description: "create accounts") {
         $0
-            .option("input", binding: \Config.file, description: "specify an input file [default \(cnf.file)]")
-            .option("key", binding: \Config.keyName, description: "public key of the account to fund")
+            .tagged("input", binding: \Config.file, description: "specify an input file [default \(cnf.file)]")
+            .tagged("key", binding: \Config.keyName, description: "public key of the account to fund")
     }
     .command(Commands.fund, description: "fund accounts, using the configured asset, if any") {
         $0
-            .option("input", binding: \Config.file, description: "specify an input file [default \(cnf.file)]")
-            .option("whitelist", binding: \Config.whitelister, description: "key with which to whitelist the tx")
-            .option("key", binding: \Config.keyName, description: "public key of the account to fund")
-            .parameter("amount", type: .int(nil), binding: \Config.amount)
+            .tagged("input", binding: \Config.file, description: "specify an input file [default \(cnf.file)]")
+            .tagged("whitelist", binding: \Config.whitelister, description: "key with which to whitelist the tx")
+            .tagged("key", binding: \Config.keyName, description: "public key of the account to fund")
+            .required("amount", type: .int(nil), binding: \Config.amount)
     }
     .command(Commands.whitelist, description: "manage the whitelist") {
         $0.command(WhitelistCommands.list, description: "list the whitelist contents and configuration")
 
         $0.command(WhitelistCommands.add, description: "add a key") {
             $0
-                .option("priority", type: .int(1...Int(Int32.max)), binding: \Config.priority)
-                .parameter("key", binding: \Config.keyName)
+                .tagged("priority", type: .int(1...Int(Int32.max)), binding: \Config.priority)
+                .required("key", binding: \Config.keyName)
         }
 
         $0.command(WhitelistCommands.remove, description: "remove a key") {
-            $0.parameter("key", binding: \Config.keyName)
+            $0.required("key", binding: \Config.keyName)
         }
 
         $0.command(WhitelistCommands.reserve, description: "set the %capacity to reserve for non-whitelisted accounts") {
-            $0.parameter("percentage", type: .int(1...100), binding: \Config.percentage)
+            $0.required("percentage", type: .int(1...100), binding: \Config.percentage)
         }
 
         $0.command(WhitelistCommands.priority, description: "set the percentages to allocate across priorities") {
             $0
-                .parameter("level", type: .int(1...20), binding: \Config.priority)
-                .parameter("percentages", type: .array(.int(1...100)), binding: \Config.percentages)
+                .required("level", type: .int(1...20), binding: \Config.priority)
+                .required("percentages", type: .array(.int(1...100)), binding: \Config.percentages)
         }
     }
     .command(Commands.data, description: "manage data on an account") {
-        $0.parameter("secret key", binding: \Config.skey, description: "secret key of account to manage")
-        $0.parameter("key name", binding: \Config.keyName, description: "key of data item")
+        $0.required("secret key", binding: \Config.skey, description: "secret key of account to manage")
+        $0.required("key name", binding: \Config.keyName, description: "key of data item")
         $0.optional("value",
                     type: .custom({ $0.data(using: .utf8) }),
                     binding: \Config.value,
@@ -116,21 +116,21 @@ let root = Command(description: "perform operations on a Horizon node", bindTarg
     }
     .command(Commands.pay, description: "send payment to the specified account") {
         $0
-            .option("whitelist", binding: \Config.whitelister, description: "key with which to whitelist the tx")
-            .parameter("secret key", binding: \Config.skey, description: "secret key of source account")
-            .parameter("destination key", binding: \Config.keyName, description: "public key of destination account")
-            .parameter("amount", type: .int(nil), binding: \Config.amount)
+            .tagged("whitelist", binding: \Config.whitelister, description: "key with which to whitelist the tx")
+            .required("secret key", binding: \Config.skey, description: "secret key of source account")
+            .required("destination key", binding: \Config.keyName, description: "public key of destination account")
+            .required("amount", type: .int(nil), binding: \Config.amount)
     }
     .command(Commands.dump, description: "dump an xdr file from a history archive as JSON") {
-        $0.parameter("file", binding: \Config.file, description: "the file to dump.  May be gzipped")
+        $0.required("file", binding: \Config.file, description: "the file to dump.  May be gzipped")
     }
     .command(Commands.seed, description: "generate network seed from passphrase") {
-        $0.parameter("passphrase", binding: \Config.passphrase)
+        $0.required("passphrase", binding: \Config.passphrase)
 }
 
 let parseResults: ParseResults
 do {
-    parseResults = try parse(CommandLine.arguments.dropFirst(), node: root)
+    parseResults = try parse(CommandLine.arguments.dropFirst(), root: root)
 }
 catch let error as CmdOptParseErrors {
     switch error {

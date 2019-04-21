@@ -8,13 +8,75 @@
 import Foundation
 
 public enum CmdOptParseErrors: Error {
+    /**
+     Unrecognized tagged parameter found.
+
+     **associated values:**
+     - argument string
+     - list of commands parsed
+     */
     case unknownOption(String, [Command])
-    case ambiguousOption(String, [_Parameter], [Command])
-    case missingValue(_Parameter, [Command])
-    case invalidValue(_Parameter, String, [Command])
-    case invalidValueType(_Parameter, String, [Command])
+
+    /**
+     Ambiguous tagged parameter found.
+
+     **associated values:**
+     - argument string
+     - list of matching parameters
+     - list of commands parsed
+
+     Tagged parameters allow prefix matching (e.g. `--file` will match a tag
+     of `filename`), but the prefix must be unambiguous across all tagged
+     parameters of the current command.
+     */
+    case ambiguousOption(String, [Parameter], [Command])
+
+    /**
+     A value for a parameter was expected, but not found.
+
+     **associated values:**
+     - the parameter whose value is missing
+     - list of commands parsed
+     */
+    case missingValue(Parameter, [Command])
+
+    /**
+     A value was successfully parsed, but is not valid.
+
+     **associated values:**
+     - the parameter whose value is invalid
+     - argument string which failed validation
+     - list of commands parsed
+
+     This exception applies to invalid int ranges and unparsable dates.
+     */
+    case invalidValue(Parameter, String, [Command])
+
+    /**
+     A value could not be converted to the expected type.
+
+     **associated values:**
+     - the parameter whose value is invalid
+     - argument string which failed conversion
+     - list of commands parsed
+
+     **Example:** "two" for an `.int` parameter
+     */
+    case invalidValueType(Parameter, String, [Command])
+
+    /*
+     A sub-command was expected, but none was found.
+
+     **associated values:**
+     - list of commands parsed
+     */
     case missingSubcommand([Command])
-    case invalidParameterType(_Parameter, [Command])
+
+    /*
+     Unrecognized tagged parameter found.
+     associated values: (unrecognized string, list of commands parsed)
+     */
+    case invalidParameterType(Parameter, [Command])
 }
 private typealias E = CmdOptParseErrors
 
@@ -23,9 +85,9 @@ public indirect enum ValueType {
     case int(ClosedRange<Int>?)    // If non-nil, values outside the range are rejected
     case double
     case bool                      // accepted strings: true/false
-    case date(format: String)      // Dates that don't match the provided format string are rejected
+    case date(format: String)      // Strings which can't be parsed with the provided format string are rejected
     case array(ValueType)          // All cases except .array are supported
-    case toggle                    // Only applies to Options.
+    case toggle                    // Only applies to tagged parameters.
     case custom((String) -> Any?)  // The closure should return nil if the value is rejected
 }
 
@@ -45,7 +107,7 @@ public final class Command {
 
     fileprivate let description: String
     fileprivate let bindTarget: AnyObject?
-    fileprivate var parameters = [_Parameter]()
+    fileprivate var parameters = [Parameter]()
     fileprivate var subcommands = [Command]()
 
     fileprivate let addToPath: AddClosure?
@@ -94,22 +156,10 @@ public extension Command {
     }
 
     @discardableResult
-    func parameter(_ parameter: String,
-                   type: ValueType = .string,
-                   description: String = "") -> Self {
-        parameters.append(Argument(parameter,
-                                   type: type,
-                                   binding: nil,
-                                   description: description))
-
-        return self
-    }
-
-    @discardableResult
-    func parameter<R, V>(_ parameter: String,
-                         type: ValueType = .string,
-                         binding: ReferenceWritableKeyPath<R, V>,
-                         description: String = "") -> Self {
+    func required<R, V>(_ parameter: String,
+                        type: ValueType = .string,
+                        binding: ReferenceWritableKeyPath<R, V>,
+                        description: String = "") -> Self {
         let b: ((Any) -> ())?
         if let target = bindTarget as? R {
             b = { target[keyPath: binding] = $0 as! V }
@@ -119,18 +169,6 @@ public extension Command {
         parameters.append(Argument(parameter,
                                    type: type,
                                    binding: b,
-                                   description: description))
-
-        return self
-    }
-
-    @discardableResult
-    func optional(_ parameter: String,
-                  type: ValueType = .string,
-                  description: String = "") -> Self {
-        parameters.append(Optional(parameter,
-                                   type: type,
-                                   binding: nil,
                                    description: description))
 
         return self
@@ -156,19 +194,7 @@ public extension Command {
     }
 
     @discardableResult
-    func option(_ option: String,
-                type: ValueType = .string,
-                description: String = "") -> Self {
-        parameters.append(Option(option,
-                                 type: type,
-                                 binding: nil,
-                                 description: description))
-
-        return self
-    }
-
-    @discardableResult
-    func option<R, V>(_ option: String,
+    func tagged<R, V>(_ parameter: String,
                       type: ValueType = .string,
                       binding: ReferenceWritableKeyPath<R, V>,
                       description: String = "") -> Self {
@@ -178,7 +204,7 @@ public extension Command {
         }
         else { b = nil }
 
-        parameters.append(Option(option,
+        parameters.append(Option(parameter,
                                  type: type,
                                  binding: b,
                                  description: description))
@@ -188,30 +214,21 @@ public extension Command {
 }
 
 private extension Command {
-    var arguments: [_Parameter] {
-        return parameters
-            .compactMap { $0 as? Argument }
-    }
+    var arguments: [Parameter] { return parameters.compactMap { $0 as? Argument } }
 
-    var optionals: [_Parameter] {
-        return parameters
-            .compactMap { $0 as? Optional }
-    }
+    var optionals: [Parameter] { return parameters.compactMap { $0 as? Optional } }
 
-    var options: [_Parameter] {
-        return parameters
-            .compactMap { $0 as? Option }
-    }
+    var options: [Parameter] { return parameters.compactMap { $0 as? Option } }
 }
 
-public class _Parameter {
+public class Parameter {
     public let token: String
 
     fileprivate let description: String
     fileprivate let type: ValueType
     fileprivate let binding: ((Any) -> ())?
 
-    fileprivate var usageToken: String { return "" }
+    fileprivate var usageToken: String { fatalError("override me") }
 
     fileprivate init(_ token: String,
                      type: ValueType,
@@ -224,32 +241,32 @@ public class _Parameter {
     }
 }
 
-public final class Argument: _Parameter {
+public final class Argument: Parameter {
     override fileprivate var usageToken: String { return "<\(token)>" }
 }
 
-public final class Option: _Parameter {
+public final class Option: Parameter {
     override fileprivate var usageToken: String { return "-\(token)" }
 }
 
-public final class Optional: _Parameter {
+public final class Optional: Parameter {
     override fileprivate var usageToken: String { return "[\(token)]" }
 }
 
 public struct ParseResults {
     public let commands: [Any]
-    public let parameterValues: [Any]
-    public let optionValues: [String: Any]
     public let remainder: [String]
 }
 
 private let dateFormatter = DateFormatter()
 
-private func prepare(_ args: [String]) -> ([String], [String]) {
+private func prepare<C: Collection>(_ args: C) -> ([String], C.SubSequence)
+    where C.Element == String
+{
     let remainderIndex = args.firstIndex(of: "--") ?? args.endIndex
-    let remainder = Array(args[remainderIndex ..< args.endIndex].dropFirst())
+    let remainder = args[remainderIndex ..< args.endIndex].dropFirst()
 
-    return (Array(args[0 ..< remainderIndex])
+    return (args[args.startIndex ..< remainderIndex]
         .map { $0.starts(with: "--") ? String($0.dropFirst()) : $0 }
         .map { a -> [String] in
             if
@@ -265,19 +282,18 @@ private func prepare(_ args: [String]) -> ([String], [String]) {
         }.flatMap { $0 }.reversed(), remainder)
 }
 
-@discardableResult
-public func parse<S: Sequence>(_ arguments: S, node: Command) throws -> ParseResults
-    where S.Element == String
+public func parse<C: Collection>(_ arguments: C,
+                                 root: Command,
+                                 optionNegation: String = "no")
+    throws -> ParseResults where C.Element == String
 {
-    var commandPath = [node]
+    var commandPath = [root]
     var commands = [Any]()
-    var parameterValues = [Any]()
-    var optionValues = [String: Any]()
 
-    var (arguments, remainder) = prepare(Array(arguments))
+    var (arguments, remainder) = prepare(arguments)
 
-    func value(arg: String, for opt: _Parameter) throws -> Any? {
-        func checkedValue(_ arg: String, for opt: _Parameter, as type: ValueType) throws -> Any {
+    func value(arg: String, for opt: Parameter) throws -> Any? {
+        func checkedValue(_ arg: String, for opt: Parameter, as type: ValueType) throws -> Any {
             let invalidValue = E.invalidValue(opt, arg, commandPath)
             let invalidValueType = E.invalidValue(opt, arg, commandPath)
 
@@ -332,10 +348,10 @@ public func parse<S: Sequence>(_ arguments: S, node: Command) throws -> ParseRes
         }
     }
 
-    func optionMatch(_ arg: String, options: [_Parameter]) throws -> _Parameter? {
+    func optionMatch(_ arg: String, options: [Parameter]) throws -> Parameter? {
         guard arg.starts(with: "-") else { return nil }
 
-        var matches = [_Parameter]()
+        var matches = [Parameter]()
 
         let arg = arg.dropFirst()
 
@@ -351,7 +367,7 @@ public func parse<S: Sequence>(_ arguments: S, node: Command) throws -> ParseRes
         if matches.isEmpty {
             matches = options.filter {
                 if $0.type.isToggle {
-                    return ("no" + $0.token).starts(with: arg)
+                    return (optionNegation + $0.token).starts(with: arg)
                 }
 
                 return false
@@ -379,17 +395,13 @@ public func parse<S: Sequence>(_ arguments: S, node: Command) throws -> ParseRes
                 if match.type.isToggle {
                     let v = !arg.starts(with: "-no")
 
-                    optionValues[match.token] = v
-
                     if let binding = match.binding { binding(v) }
                 }
                 else {
                     guard !arguments.isEmpty else { throw E.missingValue(match, commandPath) }
 
                     if let v = try value(arg: arguments.pop(), for: match) {
-                        optionValues[match.token] = v
-
-                        if let binding = match.binding { binding(v) }
+                        match.binding?(v)
                     }
                 }
             }
@@ -422,25 +434,8 @@ public func parse<S: Sequence>(_ arguments: S, node: Command) throws -> ParseRes
                 break
             }
 
-            if case .array = node.type {
-                let args = arguments.pop().split(separator: ",")
-
-                var values = [Any]()
-                for arg in args {
-                    if let v = try value(arg: String(arg), for: node) {
-                        values.append(v)
-                    }
-                }
-                parameterValues.append(values)
-
-                if let binding = node.binding { binding(values) }
-            }
-            else {
-                if let v = try value(arg: arguments.pop(), for: node) {
-                    parameterValues.append(v)
-
-                    if let binding = node.binding { binding(v) }
-                }
+            if let v = try value(arg: arguments.pop(), for: node) {
+                node.binding?(v)
             }
         }
 
@@ -449,11 +444,9 @@ public func parse<S: Sequence>(_ arguments: S, node: Command) throws -> ParseRes
         }
     }
 
-    try _parse(node: node)
+    try _parse(node: root)
 
     return ParseResults(commands: commands,
-                        parameterValues: parameterValues,
-                        optionValues: optionValues,
                         remainder: arguments + remainder)
 }
 
