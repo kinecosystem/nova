@@ -9,6 +9,7 @@
 import Foundation
 import StellarKit
 import KinUtil
+import YACLP
 import Gzip
 
 var node: StellarKit.Node!
@@ -36,11 +37,8 @@ enum WhitelistCommands: String {
     case reserve
 }
 
-let path = "./config.json"
-let file = "keypairs.json"
-
 class Config {
-    var path = "./config.json"
+    var path = "config.json"
     var file = "keypairs.json"
     var passphrase: String!
     var whitelistOverride: String?

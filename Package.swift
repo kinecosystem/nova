@@ -11,8 +11,9 @@ let package = Package(
       .package(url: "https://github.com/1024jp/GzipSwift", from: "4.1.0"),
     ],
     targets: [
+        .target(name: "YACLP"),
         .target(
             name: "nova",
-            dependencies: ["Sodium", "StellarKit", "Gzip"]),
+            dependencies: ["Sodium", "StellarKit", "Gzip", "YACLP"]),
     ]
 )

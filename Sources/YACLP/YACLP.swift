@@ -1,6 +1,6 @@
 //
 //  YACLP.swift
-//  nova
+//  YACLP
 //
 //  Created by Avi Shevin on 25/11/2018.
 //
@@ -95,7 +95,7 @@ private extension ValueType {
 }
 
 public final class Command {
-    fileprivate typealias AddClosure = (inout [Any], Any) -> ()
+    fileprivate typealias AddClosure = (inout [Any], String) -> ()
 
     public let token: String
 
@@ -136,8 +136,11 @@ public extension Command {
                         configure: (Command) -> () = { _ in }) -> Self
         where Token: RawRepresentable, Token.RawValue == String
     {
+        precondition(arguments.isEmpty && optionals.isEmpty,
+                     "A node must define either parameters or commands, but not both")
+
         let addToPath: AddClosure = {
-            $0.append(Token.init(rawValue: $1 as! String)!)
+            $0.append(Token.init(rawValue: $1)!)
         }
 
         let node = Command(token: command.rawValue,
@@ -156,15 +159,17 @@ public extension Command {
                         type: ValueType = .string,
                         binding: ReferenceWritableKeyPath<R, V>,
                         description: String = "") -> Self {
-        let b: ((Any) -> ())?
-        if let target = bindTarget as? R {
-            b = { target[keyPath: binding] = $0 as! V }
-        }
-        else { b = nil }
+        precondition(subcommands.isEmpty,
+                     "A node must define either parameters or commands, but not both")
+        precondition(!type.isToggle, "untagged parameters cannot be toggled")
+        precondition(bindTarget != nil,
+                     "cannot add parameters to command without a bindTarget.")
+
+        let target = bindTarget as! R
 
         arguments.append(Argument(parameter,
                                   type: type,
-                                  binding: b,
+                                  binding: { target[keyPath: binding] = $0 as! V },
                                   description: description))
 
         return self
@@ -175,15 +180,17 @@ public extension Command {
                         type: ValueType = .string,
                         binding: ReferenceWritableKeyPath<R, V>,
                         description: String = "") -> Self {
-        let b: ((Any) -> ())?
-        if let target = bindTarget as? R {
-            b = { target[keyPath: binding] = $0 as! V }
-        }
-        else { b = nil }
+        precondition(subcommands.isEmpty,
+                     "A node must define either parameters or commands, but not both")
+        precondition(!type.isToggle, "untagged parameters cannot be toggled")
+        precondition(bindTarget != nil,
+                     "cannot add parameters to command without a bindTarget.")
+
+        let target = bindTarget as! R
 
         optionals.append(Optional(parameter,
                                   type: type,
-                                  binding: b,
+                                  binding: { target[keyPath: binding] = $0 as! V },
                                   description: description))
 
         return self
@@ -194,15 +201,14 @@ public extension Command {
                       type: ValueType = .string,
                       binding: ReferenceWritableKeyPath<R, V>,
                       description: String = "") -> Self {
-        let b: ((Any) -> ())?
-        if let target = bindTarget as? R {
-            b = { target[keyPath: binding] = $0 as! V }
-        }
-        else { b = nil }
+        precondition(bindTarget != nil,
+                     "cannot add parameters to command without a bindTarget.")
+
+        let target = bindTarget as! R
 
         options.append(Option(parameter,
                               type: type,
-                              binding: b,
+                              binding: { target[keyPath: binding] = $0 as! V },
                               description: description))
 
         return self
@@ -369,9 +375,6 @@ public func parse<C: Collection>(_ arguments: C,
     }
 
     func _parse(node: Command) throws {
-        precondition((node.arguments.isEmpty && node.optionals.isEmpty) || node.subcommands.isEmpty,
-                     "A node must define either parameters or commands, but not both")
-
         var done = false
 
         while !arguments.isEmpty && !done {
@@ -381,7 +384,7 @@ public func parse<C: Collection>(_ arguments: C,
                 arguments.pop()
 
                 if match.type.isToggle {
-                    let v = !arg.starts(with: "-no")
+                    let v = !arg.starts(with: "-" + optionNegation)
 
                     if let binding = match.binding { binding(v) }
                 }
@@ -394,15 +397,13 @@ public func parse<C: Collection>(_ arguments: C,
                 }
             }
             else {
-                for node in node.subcommands {
-                    if node.token == arg {
-                        arguments.pop()
+                for node in node.subcommands where node.token == arg {
+                    arguments.pop()
 
-                        commandPath.append(node)
-                        node.addToPath!(&commands, node.token)
+                    commandPath.append(node)
+                    node.addToPath!(&commands, node.token)
 
-                        try _parse(node: node)
-                    }
+                    try _parse(node: node)
                 }
 
                 done = true
@@ -410,10 +411,6 @@ public func parse<C: Collection>(_ arguments: C,
         }
 
         for node in node.arguments + node.optionals {
-            guard !node.type.isToggle else {
-                fatalError("untagged parameters cannot be toggled")
-            }
-
             if arguments.isEmpty {
                 guard node is Optional else {
                     throw E.missingValue(node, commandPath)
@@ -439,9 +436,7 @@ public func parse<C: Collection>(_ arguments: C,
 }
 
 private extension Array where Element == String {
-    func peek() -> Element {
-        return self[endIndex - 1]
-    }
+    func peek() -> Element { return self[endIndex - 1] }
 
     @discardableResult
     mutating func pop() -> Element { return popLast()! }
