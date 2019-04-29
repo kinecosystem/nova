@@ -2,5 +2,5 @@
     "funder": "SECRET KEY HERE or use -cfg-funder on the commandline",
     "horizon_url": "https://horizon-testnet.kininfrastructure.com",
     "network_id": "Kin Testnet ; December 2018",
-    "whitelist": "SDL7RGPD4MSBNXXFRKGWRCHSHQN6S5HC76VJ5YDSYCLMZHRCL5MDU6LK"
+    "whitelist": "SECRET KEY HERE for the whitelisting account"
 }
