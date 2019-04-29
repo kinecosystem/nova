@@ -2,6 +2,14 @@
 
 `nova` is a command-line tool for interacting with Horizon nodes.
 
+## Building and Running
+git clone and then `swift build`. To run, use something like this (see more documentation below):
+
+```bash
+swift run nova -config=./sample-config.json fund -key SAXSDD5YEU6GMTJ5IHA6K35VZHXFVPV6IHMWYAQPSEKJRNC5LGMUQX35  100000
+```
+
+
 ## Options
 option|description
 -|-
@@ -33,12 +41,12 @@ option|description
 ```bash
 # generate 2 keypairs, saving them to keypairs.json
 
-nova -config=./federation-config.json keypairs 2
+nova -config=./sample-config.json keypairs 2
 ```
 ```bash
 # generate 1 keypair, saving it to test.json
 
-nova -config=./federation-config.json keypairs -output=test.json 1
+nova -config=./sample-config.json keypairs -output=test.json 1
 ```
 
 ### create
@@ -54,24 +62,35 @@ option|description
 ```bash
 # read from keypairs.json, creating accounts for all keys found
 
-nova -config=./federation-config.json create
+nova -config=./sample-config.json create
 ```
 ```bash
 # read from keypairs.json, creating accounts for all keys found
 # override the funding account
 
 nova -cfg-funder=SAXSDD5YEU6GMTJ5IHA6K35VZHXFVPV6IHMWYAQPSEKJRNC5LGMUQX35 \
-     -config=./federation-config.json create
+     -config=./sample-config.json create
 ```
 ```bash
 # read from test.json, creating accounts for all keys found
 
-nova -config=./federation-config.json create -input=test.json
+nova -config=./sample-config.json create -input=test.json
 ```
 ```bash
 # create a single account
 
-nova -config=./federation-config.json create GC3Y3Y7DJ3J6PGNHI5KBUO7AXZXDTKUUYA6K3FVHDOFCEGYZJ27GHNAR
+nova -config=./sample-config.json create -key GC3Y3Y7DJ3J6PGNHI5KBUO7AXZXDTKUUYA6K3FVHDOFCEGYZJ27GHNAR
+```
+
+### fund
+The `fund` command sends money to the specified accounts on the network. 
+
+##### Examples
+
+```bash
+# fund a single account
+
+nova -config=./sample-config.json fund -key GC3Y3Y7DJ3J6PGNHI5KBUO7AXZXDTKUUYA6K3FVHDOFCEGYZJ27GHNAR 100000
 ```
 
 ### whitelist
@@ -86,23 +105,23 @@ command|description
 
 ##### list
 ```bash
-nova -config=./federation-config.json whitelist list
+nova -config=./sample-config.json whitelist list
 ```
 
 ##### add
 ```bash
-nova -config=./federation-config.json whitelist add GC3Y3Y7DJ3J6PGNHI5KBUO7AXZXDTKUUYA6K3FVHDOFCEGYZJ27GHNAR
+nova -config=./sample-config.json whitelist add GC3Y3Y7DJ3J6PGNHI5KBUO7AXZXDTKUUYA6K3FVHDOFCEGYZJ27GHNAR
 ```
 
 ##### remove
 ```bash
-nova -config=./federation-config.json whitelist remove GC3Y3Y7DJ3J6PGNHI5KBUO7AXZXDTKUUYA6K3FVHDOFCEGYZJ27GHNAR
+nova -config=./sample-config.json whitelist remove GC3Y3Y7DJ3J6PGNHI5KBUO7AXZXDTKUUYA6K3FVHDOFCEGYZJ27GHNAR
 ```
 
 ##### reserve
 ```bash
 # reserve up-to 13% of available slots for non-whitelisted transactions
-nova -config=./federation-config.json whitelist reserve 13
+nova -config=./sample-config.json whitelist reserve 13
 ```
 
 ### dump
