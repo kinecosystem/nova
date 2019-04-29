@@ -17,5 +17,6 @@ deploy:
     - ".build/release/nova"
     - "sample-config.json"
   on:
-    repo: kinecosystem/nova
-    branch: travis
+    tags: true
+    # repo: kinecosystem/nova
+    # branch: travis
