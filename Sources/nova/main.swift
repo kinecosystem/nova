@@ -12,9 +12,9 @@ import KinUtil
 import YACLP
 import Gzip
 
-var node: StellarKit.Node!
+var node: StellarKit.Node?
 var whitelist: StellarAccount?
-var xlmIssuer: StellarAccount!
+var xlmIssuer: StellarAccount?
 var asset: Asset = .ASSET_TYPE_NATIVE
 var issuerSeed: String!
 
@@ -27,6 +27,7 @@ enum Commands: String {
     case pay
     case dump
     case seed
+    case pkey
 }
 
 enum WhitelistCommands: String {
@@ -44,7 +45,7 @@ class Config {
     var whitelistOverride: String?
     var funderOverride: String?
     var amount: Int!
-    var skey: String!
+    var skey: StellarKey!
     var whitelister: String?
     var percentages: [Int]?
     var percentage: Int!
@@ -67,7 +68,7 @@ let root = Command(description: "perform operations on a Horizon node", bindTarg
     .command(Commands.keypairs, description: "create keypairs for use by other commands") {
         $0
             .tagged("output", binding: \Config.file, description: "specify an output file [default \(cnf.file)]")
-            .required("amount", type: .int(nil), binding: \Config.amount)
+            .optional("amount", type: .int(nil), binding: \Config.amount)
     }
     .command(Commands.create, description: "create accounts") {
         $0
@@ -124,6 +125,9 @@ let root = Command(description: "perform operations on a Horizon node", bindTarg
     }
     .command(Commands.seed, description: "generate network seed from passphrase") {
         $0.required("passphrase", binding: \Config.passphrase)
+    }
+    .command(Commands.pkey, description: "display public key for given seed") {
+        $0.required("skey", type: .custom({ StellarKey($0)! }), binding: \Config.skey)
 }
 
 let parseResults: ParseResults
@@ -196,7 +200,7 @@ catch {
 
 let command = parseResults.commands[0] as! Commands
 
-if command != .dump && command != .seed {
+if ![Commands.dump, .seed, .pkey].contains(command) {
     printConfig()
 }
 
@@ -314,7 +318,7 @@ case .whitelist:
     while waiting {}
 
 case .data:
-    let account = StellarAccount(seedStr: cnf.skey)
+    let account = StellarAccount(stellarKey: cnf.skey)
     let val = cnf.value
 
     if let val = val {
@@ -333,7 +337,7 @@ case .data:
     while waiting {}
 
 case .pay:
-    let source = StellarAccount(seedStr: cnf.skey)
+    let source = StellarAccount(stellarKey: cnf.skey)
     let destination = cnf.keyName
     let amount = cnf.amount ?? 1000
 
@@ -351,4 +355,8 @@ case .dump:
 case .seed:
     let sha = cnf.passphrase.data(using: .utf8)!.sha256
     print("Seed: \(StellarKey(sha, type: .ed25519SecretSeed))")
+
+case .pkey:
+    let account = StellarAccount(stellarKey: cnf.skey)
+    print("Public Key: \(account.publicKey)")
 }

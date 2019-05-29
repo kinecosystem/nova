@@ -10,13 +10,15 @@ import Foundation
 import StellarKit
 
 func printConfig() {
-    print(
-        """
-        Configuration:
-        XLM Issuer: \(xlmIssuer.publicKey)
-        Node: \(node.baseURL) [\(node.networkId)]
-        """
-    )
+    print("Configuration:")
+
+    if let xlmIssuer = xlmIssuer {
+        print("XLM Issuer: \(xlmIssuer.publicKey)")
+    }
+
+    if let node = node {
+        print("Node: \(node.baseURL) [\(node.networkId )]")
+    }
 
     if let whitelist = whitelist {
         print("    Whitelist: \(whitelist.publicKey)")

@@ -21,11 +21,11 @@ struct ErrorMessage: Error, CustomStringConvertible {
 func create(accounts: [String]) -> Promise<String> {
     checkCreateConfig()
 
-    return TxBuilder(source: xlmIssuer, node: node)
+    return TxBuilder(source: xlmIssuer!, node: node!)
         .add(operations: accounts.map({ StellarKit.Operation.createAccount(destination: StellarKey($0)!,
-                                                                           balance: 0) }))
+                                                                           balance: 100000000000) }))
         .signedEnvelope()
-        .post(to: node)
+        .post(to: node!)
         .then { result -> String in print("Created \(accounts.count) accounts"); return result.hash }
 }
 
@@ -35,7 +35,7 @@ func fund(from source: StellarAccount? = nil, accounts: [String], asset: Asset, 
     let issuer = source ??
         (asset == .ASSET_TYPE_NATIVE ? xlmIssuer! : StellarAccount(seedStr: issuerSeed))
 
-    let builder = TxBuilder(source: issuer, node: node)
+    let builder = TxBuilder(source: issuer, node: node!)
         .add(operations: accounts.map({ StellarKit.Operation.payment(destination: StellarKey($0)!,
                                                                      amount: Int64(amount) * 100_000,
                                                                      asset: asset) }))
@@ -46,7 +46,7 @@ func fund(from source: StellarAccount? = nil, accounts: [String], asset: Asset, 
 
     return builder
         .signedEnvelope()
-        .post(to: node)
+        .post(to: node!)
         .then({ result -> String in
             print("Funded \(accounts.count) account(s)")
             return result.hash
@@ -59,11 +59,11 @@ func fund(from source: StellarAccount? = nil, accounts: [String], asset: Asset, 
 func data(account: StellarAccount, key: String, val: Data?, fee: UInt32? = nil) -> Promise<String> {
     checkNodeConfig()
 
-    return TxBuilder(source: account, node: node)
+    return TxBuilder(source: account, node: node!)
         .add(operation: StellarKit.Operation.manageData(key: key, value: val))
         .set(fee: fee)
         .signedEnvelope()
-        .post(to: node)
+        .post(to: node!)
         .then { result -> String in
             return result.hash
         }
@@ -122,7 +122,7 @@ func dump() {
 func list(whitelist: StellarAccount) {
     var waiting = true
 
-    whitelist.details(node: node)
+    whitelist.details(node: node!)
         .then({ details in
             let overrides = details.data.filter { $0.0.starts(with: "priority_count_") }
             let keys = details.data.filter { $0.0.utf8.count == 56 }
